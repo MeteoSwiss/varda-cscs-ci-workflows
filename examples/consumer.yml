@@ -1,0 +1,50 @@
+# examples/consumer.yml — a typical multi-job consumer: build an environment in
+# one job, use it in the next, always clean up. Linted on every PR (see
+# tests/flatten.sh), so it doubles as a check that the blocks compose.
+
+include:
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/.ci-ext-mch.yml'
+
+stages:
+  - setup
+  - test
+  - cleanup
+
+# The repo's own runner settings — never FIRECREST_SYSTEM, that is cluster.yml's.
+.runner:
+  extends: [.baremetal-runner-mch]
+  variables:
+    SLURM_TIMELIMIT: '00:30:00'
+    MCH_WORK_NAME: 'example-ci'
+
+setup:
+  extends: [.runner]
+  stage: setup
+  script:
+    - !reference [.mch-sh-preamble, script]
+    - !reference [.mch-log-ci-context, script]
+    - !reference [.mch-env-paths, script]
+    - !reference [.mch-log-tool-versions, script]
+    - !reference [.mch-install-uv, script]
+    - |
+      cp -r "$CI_PROJECT_DIR/." "$WORK/src"
+      cd "$WORK/src"
+    - !reference [.mch-uv-sync, script]
+
+test:
+  extends: [.runner]
+  stage: test
+  needs: [setup]
+  variables:
+    GIT_STRATEGY: 'none'
+  script:
+    - !reference [.mch-sh-preamble, script]
+    - !reference [.mch-env-paths, script]
+    - !reference [.mch-install-uv, script]  # a no-op: setup left uv in $HOME
+    - |
+      cd "$WORK/src"
+      uv run pytest
+
+cleanup:
+  extends: [.runner, .mch-cleanup-job]
+  stage: cleanup

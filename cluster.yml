@@ -1,0 +1,16 @@
+# cluster.yml — which MeteoSwiss cluster `.baremetal-runner-mch` lands on.
+#
+# Deliberately unversioned: every version directory (v1/, v2/, ...) includes this
+# one file, so a single commit here moves every consumer of every version at
+# once. balfrin and linard sit behind the same FirecREST endpoint and are both
+# x86_64, so FIRECREST_SYSTEM is the only thing that differs between them.
+#
+# Repos that must stay on one cluster regardless use
+# `.baremetal-runner-mch-balfrin` / `.baremetal-runner-mch-linard` instead.
+#
+# Consumers fetch this through raw.githubusercontent.com, whose CDN caches for
+# about five minutes: a switch takes that long to reach new pipelines.
+
+.mch-cluster:
+  variables:
+    FIRECREST_SYSTEM: 'linard'  # balfrin | linard

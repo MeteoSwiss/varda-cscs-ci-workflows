@@ -1,0 +1,75 @@
+name: Static checks
+
+# Required by branch protection on main, next to cscs-ci's `cscs/integration`.
+# Every consumer follows main, so nothing merges unless these pass.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: uvx yamllint --strict .
+
+  schema:
+    name: gitlab-ci schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      # Per file, plus the merged consumer: GitLab's JSON schema for CI files,
+      # with `!reference` understood (--data-transform gitlab-ci).
+      - run: |
+          tests/flatten.sh > "$RUNNER_TEMP/consumer.gitlab-ci.yml"
+          uvx check-jsonschema --builtin-schema vendor.gitlab-ci --data-transform gitlab-ci \
+            --regex-variant nonunicode \
+            cluster.yml v1/*.yml v1/.ci-ext-mch.yml .cscs/*.yml examples/*.yml \
+            "$RUNNER_TEMP/consumer.gitlab-ci.yml"
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # shellcheck and yq (mikefarah v4) are preinstalled on ubuntu-latest.
+      - run: tests/shellcheck.sh
+
+  gitlab-lint:
+    name: gitlab lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: GitLab CI lint of the example consumer
+        env:
+          GITLAB_LINT_TOKEN: ${{ secrets.GITLAB_LINT_TOKEN }}
+          GITLAB_LINT_PROJECT_ID: ${{ vars.GITLAB_LINT_PROJECT_ID }}
+        run: |
+          # Secrets are not passed to PRs from forks; the token-free jobs still run.
+          if [ -z "$GITLAB_LINT_TOKEN" ] || [ -z "$GITLAB_LINT_PROJECT_ID" ]; then
+            echo "::warning::GITLAB_LINT_TOKEN / GITLAB_LINT_PROJECT_ID not available — skipped"
+            exit 0
+          fi
+          tests/gitlab-lint.sh
+
+  merged:
+    name: merged pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Token-free check that `extends` and `!reference` resolve across the
+      # merged files: gitlab-ci-local builds the pipeline and lists its jobs.
+      - run: |
+          tests/flatten.sh > .gitlab-ci-merged.yml
+          npx --yes gitlab-ci-local@4 --file .gitlab-ci-merged.yml --list

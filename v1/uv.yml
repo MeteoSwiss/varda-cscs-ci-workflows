@@ -1,0 +1,38 @@
+# v1/uv.yml — install uv, and build a project's venv with it.
+#
+# Bare-metal nodes have no uv: the job installs its own, pinned so that a new
+# uv release cannot change behavior unnoticed.
+#
+# Inputs (CI variables):
+#   MCH_UV_VERSION        uv version to install (default 0.11.32).
+#   UV_PYTHON_PREFERENCE  default only-managed: build on a uv-managed CPython,
+#                         never the node's /usr/bin/python3, which has no
+#                         Python.h (triton JIT-compiles against it). A missing
+#                         download then fails loudly instead of falling back.
+#   UV_PYTHON_DOWNLOADS   default automatic.
+#   MCH_UV_SYNC_ARGS      extra arguments for `uv sync` (.mch-uv-sync).
+
+# Needs .mch-env-paths first: uv goes to $HOME/.local/bin, already on PATH, so
+# a later job of the same pipeline finds it there and skips the download.
+.mch-install-uv:
+  script:
+    - |
+      banner "Install uv"
+      export UV_PYTHON_PREFERENCE="${UV_PYTHON_PREFERENCE:-only-managed}"
+      export UV_PYTHON_DOWNLOADS="${UV_PYTHON_DOWNLOADS:-automatic}"
+      uv_version="${MCH_UV_VERSION:-0.11.32}"
+      if [ -x "$HOME/.local/bin/uv" ] && [ "$("$HOME/.local/bin/uv" --version | cut -d' ' -f2)" = "$uv_version" ]; then
+        echo "uv $uv_version already in $HOME/.local/bin"
+      else
+        curl -LsSf "https://astral.sh/uv/${uv_version}/install.sh" \
+          | env UV_INSTALL_DIR="$HOME/.local/bin" INSTALLER_NO_MODIFY_PATH=1 sh
+      fi
+      uv --version
+
+# `uv sync` in the current directory. Needs .mch-install-uv.
+.mch-uv-sync:
+  script:
+    - |
+      banner "uv sync"
+      # shellcheck disable=SC2086  # MCH_UV_SYNC_ARGS is a word list on purpose
+      uv sync ${MCH_UV_SYNC_ARGS:-}

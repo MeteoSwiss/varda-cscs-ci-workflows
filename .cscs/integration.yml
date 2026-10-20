@@ -1,0 +1,46 @@
+# .cscs/integration.yml — this repository's own cscs-ci pipeline "integration".
+# Runs automatically on every PR to main and every push to main; its result is
+# the `cscs/integration` status that branch protection requires.
+#
+# The blocks are included with `include: local`, and v1/.ci-ext-mch.yml's
+# nested includes switch to local inside this project too, so the pipeline
+# tests the commit under review, never main.
+#
+# One job, on `.baremetal-runner-mch` — the cluster cluster.yml names, i.e. the
+# one every consumer is on. It runs the shell, env and uv blocks end to end — uv
+# install, a uv sync on a dependency-free fixture project on a uv-managed
+# Python — then checks it landed on that cluster. A PR that switches cluster.yml
+# therefore tests the new cluster before anyone is moved to it.
+
+include:
+  - local: '/v1/.ci-ext-mch.yml'
+
+selftest:
+  extends: [.baremetal-runner-mch]
+  variables:
+    SLURM_TIMELIMIT: '00:10:00'
+    MCH_WORK_NAME: 'mch-recipes-selftest'
+  script:
+    - !reference [.mch-sh-preamble, script]
+    - !reference [.mch-log-ci-context, script]
+    - !reference [.mch-env-paths, script]
+    - !reference [.mch-log-tool-versions, script]
+    - !reference [.mch-install-uv, script]
+    - |
+      cp -r "$CI_PROJECT_DIR/tests/fixture" "$WORK/fixture"
+      cd "$WORK/fixture"
+    - !reference [.mch-uv-sync, script]
+    - |
+      banner "Check the venv's Python"
+      # uv-managed (not the node's /usr/bin/python3) and ships its headers —
+      # the reason .mch-install-uv defaults UV_PYTHON_PREFERENCE=only-managed.
+      uv run python - <<'PY'
+      import os, sys, sysconfig
+      base = os.path.realpath(sys.base_prefix)
+      header = os.path.join(sysconfig.get_paths()["include"], "Python.h")
+      print(f"python {sys.version.split()[0]} at {base}")
+      assert not base.startswith("/usr"), f"system python in use: {base}"
+      assert os.path.exists(header), f"no {header}"
+      PY
+    - !reference [.mch-assert-cluster, script]
+    - !reference [.mch-cleanup, script]
