@@ -19,7 +19,7 @@
     - |
       banner "CI context"
       echo "host=$(hostname -f 2>/dev/null || hostname)  user=$(whoami)"
-      echo "cluster: requested=${FIRECREST_SYSTEM:-?}  slurm=${SLURM_CLUSTER_NAME:-?}  env=${CLUSTER_NAME:-?}"
+      echo "cluster: requested=${FIRECREST_SYSTEM:-?}  actual=${CLUSTER_NAME:-?}"
       echo "project=${CI_PROJECT_PATH:-?} (id ${CI_PROJECT_ID:-?})  ref=${CI_COMMIT_REF_NAME:-?}  sha=${CI_COMMIT_SHA:-?}"
       echo "server=${CI_SERVER_URL:-?}"
       echo "pipeline=${CI_PIPELINE_ID:-?}  job=${CI_JOB_ID:-?}  concurrent_id=${CI_CONCURRENT_ID:-?}"
@@ -47,14 +47,14 @@
 
 # Fail unless the job landed on the expected cluster: MCH_EXPECTED_CLUSTER if
 # set, else the FIRECREST_SYSTEM the runner asked for. Compute nodes are named
-# nid######, so the cluster comes from SLURM, then from the system's
-# CLUSTER_NAME.
+# nid######, so the cluster comes from the system's CLUSTER_NAME, then from
+# SLURM's config.
 .mch-assert-cluster:
   script:
     - |
       banner "Assert cluster"
       expected="${MCH_EXPECTED_CLUSTER:-${FIRECREST_SYSTEM:-}}"
-      actual="${SLURM_CLUSTER_NAME:-${CLUSTER_NAME:-}}"
+      actual="${CLUSTER_NAME:-}"
       if [ -z "$actual" ] && command -v scontrol >/dev/null 2>&1; then
         actual="$(scontrol show config 2>/dev/null | awk -F'= *' '/^ClusterName/ {print $2}')"
       fi

@@ -101,7 +101,7 @@ notably `SLURM_TIMELIMIT: 00:15:00`; override what your job needs in its `variab
 | `.mch-log-ci-context` | Logs host, requested vs. actual cluster, project, ref, SHA, pipeline and job. | – |
 | `.mch-log-tool-versions` | Logs the version of each tool, or `MISSING`. | `MCH_LOG_TOOLS` (default `git curl yq uv python3`) |
 | `.mch-verify-main` | Fails unless the pipeline runs on `main` — for pipelines that publish. | – |
-| `.mch-assert-cluster` | Fails unless the job runs on the expected cluster (`SLURM_CLUSTER_NAME`, then `CLUSTER_NAME`, then `scontrol`). | `MCH_EXPECTED_CLUSTER` (default `$FIRECREST_SYSTEM`) |
+| `.mch-assert-cluster` | Fails unless the job runs on the expected cluster (`CLUSTER_NAME`, then `scontrol`). | `MCH_EXPECTED_CLUSTER` (default `$FIRECREST_SYSTEM`) |
 
 ### env ([`v1/env.yml`](v1/env.yml))
 
