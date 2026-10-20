@@ -1,7 +1,7 @@
 # v1/.ci-ext-mch.yml — the one file a consumer includes:
 #
 #   include:
-#     - remote: 'https://raw.githubusercontent.com/MeteoSwiss/mch-cscs-ci-recipes/init/v1/.ci-ext-mch.yml'
+#     - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/v1/.ci-ext-mch.yml'
 #
 # It pulls in cscs-ci's own templates, the cluster switch (../cluster.yml) and
 # every v1 building block (shell.yml, env.yml, uv.yml), and defines the runners.
@@ -25,19 +25,19 @@ include:
   - remote: 'https://gitlab.com/cscs-ci/recipes/-/raw/master/templates/v2/.ci-ext.yml'
   - local: '/cluster.yml'
     rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/mch-cscs-ci-recipes/init/cluster.yml'
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/cluster.yml'
     rules: *mch-other
   - local: '/v1/shell.yml'
     rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/mch-cscs-ci-recipes/init/v1/shell.yml'
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/v1/shell.yml'
     rules: *mch-other
   - local: '/v1/env.yml'
     rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/mch-cscs-ci-recipes/init/v1/env.yml'
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/v1/env.yml'
     rules: *mch-other
   - local: '/v1/uv.yml'
     rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/mch-cscs-ci-recipes/init/v1/uv.yml'
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/v1/uv.yml'
     rules: *mch-other
 
 # ── runners ──────────────────────────────────────────────────────────────────

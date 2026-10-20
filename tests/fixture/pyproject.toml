@@ -1,7 +1,7 @@
 # A dependency-free project for the integration test's `uv sync`: it exercises
 # the uv install and the managed-Python download without fetching any wheels.
 [project]
-name = "mch-cscs-ci-recipes-fixture"
+name = "varda-cscs-ci-workflows-fixture"
 version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = []

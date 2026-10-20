@@ -1,4 +1,4 @@
-# mch-cscs-ci-recipes
+# varda-cscs-ci-workflows
 
 Shared [CSCS-CI](https://docs.cscs.ch/services/cicd/) building blocks for MeteoSwiss
 repositories: the runner for the bare-metal clusters (balfrin, linard) and the script
@@ -23,7 +23,7 @@ One include gives you cscs-ci's templates, the cluster switch and every v1 block
 
 ```yaml
 include:
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/mch-cscs-ci-recipes/main/v1/.ci-ext-mch.yml'
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/.ci-ext-mch.yml'
 
 .runner:
   extends: [.baremetal-runner-mch]

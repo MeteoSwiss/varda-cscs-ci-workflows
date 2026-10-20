@@ -3,7 +3,7 @@
 # tests/flatten.sh), so it doubles as a check that the blocks compose.
 
 include:
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/mch-cscs-ci-recipes/main/v1/.ci-ext-mch.yml'
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/.ci-ext-mch.yml'
 
 stages:
   - setup

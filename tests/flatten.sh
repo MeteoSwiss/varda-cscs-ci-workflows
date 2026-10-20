@@ -19,8 +19,8 @@ consumer="${1:-$root/examples/consumer.yml}"
 blocks=("$root/cluster.yml" "$root/v1/shell.yml" "$root/v1/env.yml" "$root/v1/uv.yml" "$root/v1/.ci-ext-mch.yml")
 
 # Includes of this repository: any `local` in our own files, any remote URL of ours.
-ours='(type == "!!map" and ((has("local") and $f != "consumer") or ((.remote // "") | test("MeteoSwiss/mch-cscs-ci-recipes/"))))
-      or (type == "!!str" and test("MeteoSwiss/mch-cscs-ci-recipes/"))'
+ours='(type == "!!map" and ((has("local") and $f != "consumer") or ((.remote // "") | test("MeteoSwiss/varda-cscs-ci-workflows/"))))
+      or (type == "!!str" and test("MeteoSwiss/varda-cscs-ci-workflows/"))'
 
 includes=""
 for f in "${blocks[@]}" "$consumer"; do
