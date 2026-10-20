@@ -35,7 +35,7 @@
         if command -v "$t" >/dev/null 2>&1; then echo "  $t: $("$t" --version 2>&1 | head -1)"; else echo "  $t: MISSING"; fi
       done
 
-# Refuse to run anywhere but main — for pipelines that publish (register, release).
+# Refuse to run anywhere but main.
 .mch-verify-main:
   script:
     - |
