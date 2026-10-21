@@ -13,7 +13,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if (($# == 0)); then
-  set -- "$root/cluster.yml" "$root"/v1/*.yml "$root"/v1/.ci-ext-mch.yml "$root"/.cscs/*.yml "$root"/examples/*.yml
+  set -- "$root/cluster.yml" "$root"/v1/.ci-ext-mch.yml "$root"/.cscs/*.yml "$root"/examples/*.yml
 fi
 
 tmp="$(mktemp -d)"

@@ -4,7 +4,7 @@
 #   tests/includes.sh
 #
 # Consumers follow main, and so must every nested include they pull in: a URL
-# to another branch silently serves that branch's blocks, or 404s and stops
+# to another branch silently serves that branch's files, or 404s and stops
 # every consumer pipeline from being created. The other checks never fetch
 # these URLs (tests/flatten.sh drops them), so this one checks that:
 #   - every URL to this repository in the CI files and docs names `main`;

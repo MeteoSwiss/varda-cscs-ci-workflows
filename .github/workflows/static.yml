@@ -33,7 +33,7 @@ jobs:
           tests/flatten.sh > "$RUNNER_TEMP/consumer.gitlab-ci.yml"
           uvx check-jsonschema --builtin-schema vendor.gitlab-ci --data-transform gitlab-ci \
             --regex-variant nonunicode \
-            cluster.yml v1/*.yml v1/.ci-ext-mch.yml .cscs/*.yml examples/*.yml \
+            cluster.yml v1/.ci-ext-mch.yml .cscs/*.yml examples/*.yml \
             "$RUNNER_TEMP/consumer.gitlab-ci.yml"
 
   shellcheck:

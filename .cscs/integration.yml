@@ -2,12 +2,12 @@
 # Runs automatically on every PR to main and every push to main; its result is
 # the `cscs/integration` status that branch protection requires.
 #
-# The blocks are included with `include: local`, and v1/.ci-ext-mch.yml's
-# nested includes switch to local inside this project too, so the pipeline
-# tests the commit under review, never main.
+# v1/.ci-ext-mch.yml, which holds every block, is included with `include:
+# local`, and its nested include of cluster.yml switches to local inside this
+# project too, so the pipeline tests the commit under review, never main.
 #
 # One job, on `.baremetal-runner-mch` — the cluster cluster.yml names, i.e. the
-# one every consumer is on. It runs the shell, env and uv blocks end to end — uv
+# one every consumer is on. It runs the shell, env, uenv and uv blocks end to end — uv
 # install, a uv sync on a dependency-free fixture project on a uv-managed
 # Python — then checks it landed on that cluster. A PR that switches cluster.yml
 # therefore tests the new cluster before anyone is moved to it.

@@ -1,20 +1,21 @@
-# v1/.ci-ext-mch.yml — the one file a consumer includes:
+# v1/.ci-ext-mch.yml — v1, the one file a consumer includes:
 #
 #   include:
 #     - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/.ci-ext-mch.yml'
 #
-# It pulls in cscs-ci's own templates, the cluster switch (../cluster.yml) and
-# every v1 building block (shell.yml, env.yml, uenv.yml, uv.yml), and defines the
-# runners.
+# It holds every v1 building block (shell, env, uenv, uv) and the runners, and
+# includes cscs-ci's own templates and the cluster switch (../cluster.yml). A
+# consumer pointed at a branch of this file therefore runs that branch's blocks.
 #
-# Nested includes of a remotely included file cannot be `local` (they would
-# resolve in the *consumer's* project), so each of our files is included twice
-# behind mutually exclusive rules: `local` inside this repository's own pipeline
-# — the integration test then exercises the PR commit, not main — and `remote`
+# cluster.yml stays a file of its own, unversioned, so one commit moves every
+# version. Nested includes of a remotely included file cannot be `local` (they
+# would resolve in the *consumer's* project), so it is included twice behind
+# mutually exclusive rules: `local` inside this repository's own pipeline — the
+# integration test then exercises the PR's cluster, not main's — and `remote`
 # from main everywhere else. cscs-ci's .ci-ext.yml uses the same trick.
 
 # CI_PROJECT_ID of this repository's mirror on the cscs-ci GitLab. Until it is
-# filled in, the rule never matches and the remote copies (main) are used.
+# filled in, the rule never matches and the remote copy (main) is used.
 .mch-self-project:
   rules: &mch-self
     - if: '$CI_PROJECT_ID == "0"'
@@ -28,22 +29,205 @@ include:
     rules: *mch-self
   - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/cluster.yml'
     rules: *mch-other
-  - local: '/v1/shell.yml'
-    rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/shell.yml'
-    rules: *mch-other
-  - local: '/v1/env.yml'
-    rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/env.yml'
-    rules: *mch-other
-  - local: '/v1/uenv.yml'
-    rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/uenv.yml'
-    rules: *mch-other
-  - local: '/v1/uv.yml'
-    rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/uv.yml'
-    rules: *mch-other
+
+# ── shell ────────────────────────────────────────────────────────────────────
+
+# Shell preamble, logging and guards.
+#
+# Script fragments, pulled into a job with `!reference [.name, script]`. GitLab
+# concatenates every referenced fragment into one shell, so the functions and
+# exports of one fragment are in scope for the next. Reference
+# `.mch-sh-preamble` first: the others use its banner().
+
+# Strict mode and a banner() helper for section headers.
+.mch-sh-preamble:
+  script:
+    - |
+      set -euo pipefail
+      banner() { printf '\n\033[1;36m==== %s ====\033[0m\n' "$*"; }
+
+# Print where and what this job is, so a log explains itself. The cluster line
+# shows both what was asked for (FIRECREST_SYSTEM) and where the job landed.
+.mch-log-ci-context:
+  script:
+    - |
+      banner "CI context"
+      echo "host=$(hostname -f 2>/dev/null || hostname)  user=$(whoami)"
+      echo "cluster: requested=${FIRECREST_SYSTEM:-?}  actual=${CLUSTER_NAME:-?}"
+      echo "project=${CI_PROJECT_PATH:-?} (id ${CI_PROJECT_ID:-?})  ref=${CI_COMMIT_REF_NAME:-?}  sha=${CI_COMMIT_SHA:-?}"
+      echo "server=${CI_SERVER_URL:-?}"
+      echo "pipeline=${CI_PIPELINE_ID:-?}  job=${CI_JOB_ID:-?}  concurrent_id=${CI_CONCURRENT_ID:-?}"
+      echo "CI_PROJECT_DIR=${CI_PROJECT_DIR:-?}"
+      echo "PWD=$PWD"
+
+# Report the tools the job relies on. MCH_LOG_TOOLS: space-separated list.
+.mch-log-tool-versions:
+  script:
+    - |
+      banner "Tool availability"
+      for t in ${MCH_LOG_TOOLS:-git curl yq uv python3}; do
+        if command -v "$t" >/dev/null 2>&1; then echo "  $t: $("$t" --version 2>&1 | head -1)"; else echo "  $t: MISSING"; fi
+      done
+
+# Refuse to run anywhere but main.
+.mch-verify-main:
+  script:
+    - |
+      banner "Verify trigger is on main"
+      if [ "${CI_COMMIT_BRANCH:-}" != "main" ]; then
+        echo "This pipeline can only be triggered from main (got '${CI_COMMIT_BRANCH:-<none>}')." >&2
+        exit 1
+      fi
+
+# Fail unless the job landed on the expected cluster: MCH_EXPECTED_CLUSTER if
+# set, else the FIRECREST_SYSTEM the runner asked for. Compute nodes are named
+# nid######, so the cluster comes from the system's CLUSTER_NAME, then from
+# SLURM's config.
+.mch-assert-cluster:
+  script:
+    - |
+      banner "Assert cluster"
+      expected="${MCH_EXPECTED_CLUSTER:-${FIRECREST_SYSTEM:-}}"
+      actual="${CLUSTER_NAME:-}"
+      if [ -z "$actual" ] && command -v scontrol >/dev/null 2>&1; then
+        actual="$(scontrol show config 2>/dev/null | awk -F'= *' '/^ClusterName/ {print $2}')"
+      fi
+      echo "expected=${expected:-<unset>}  actual=${actual:-<unknown>}"
+      if [ -z "$expected" ] || [ -z "$actual" ]; then
+        echo "Cannot tell which cluster this is (expected='$expected', actual='$actual')." >&2
+        exit 1
+      fi
+      if [ "$actual" != "$expected" ]; then
+        echo "Landed on '$actual', expected '$expected'." >&2
+        exit 1
+      fi
+
+# ── env ──────────────────────────────────────────────────────────────────────
+
+# The job's working directory, and removing it again.
+#
+# Compute nodes have no mounted home, so HOME is repointed into a per-pipeline
+# workdir on $SCRATCH. $SCRATCH is mounted on every node of the cluster and
+# CI_PIPELINE_ID is the same in every job of a pipeline, so jobs (each its own
+# SLURM allocation) can hand state over through it: tools installed under HOME
+# by one job are found by the next.
+#
+# Inputs (CI variables):
+#   MCH_WORK_DIR   the workdir, verbatim. Wins over MCH_WORK_NAME. Set it to
+#                  $CI_PROJECT_DIR to work in the runner's build directory.
+#   MCH_WORK_NAME  workdir = $SCRATCH/$MCH_WORK_NAME/$CI_PIPELINE_ID
+#                  (default: <project name>-ci).
+#   UV_CACHE_DIR   default $SCRATCH/.cache/uv — persistent across pipelines.
+# Exports: WORK, HOME, PATH (+ $HOME/.local/bin), UV_CACHE_DIR.
+
+.mch-env-paths:
+  script:
+    - |
+      banner "Environment paths"
+      export WORK="${MCH_WORK_DIR:-$SCRATCH/${MCH_WORK_NAME:-${CI_PROJECT_NAME}-ci}/$CI_PIPELINE_ID}"
+      export HOME="$WORK/home"
+      export PATH="$HOME/.local/bin:$PATH"
+      export UV_CACHE_DIR="${UV_CACHE_DIR:-$SCRATCH/.cache/uv}"
+      mkdir -p "$HOME" "$UV_CACHE_DIR"
+      echo "WORK=$WORK"
+      echo "HOME=$HOME"
+      echo "UV_CACHE_DIR=$UV_CACHE_DIR"
+
+# Remove $WORK. Needs .mch-env-paths. Refuses anything that is not a
+# subdirectory of its own (an unset or mistyped input must not wipe $SCRATCH or
+# the checkout). The uv cache is left in place for the next pipeline.
+.mch-cleanup:
+  script:
+    - |
+      banner "Clean up"
+      case "${WORK:-}" in
+        ""|/|"${SCRATCH:-/}"|"${SCRATCH:-/}/"|"${CI_PROJECT_DIR:-/}")
+          echo "refusing to remove WORK='${WORK:-}'" >&2
+          exit 1 ;;
+      esac
+      echo "removing $WORK"
+      rm -rf "${WORK:?}"
+
+# A whole cleanup job. It runs even when earlier jobs failed, so a workdir never
+# leaks. Add the runner and the stage:
+#
+#   cleanup:
+#     extends: [.baremetal-runner-mch, .mch-cleanup-job]
+#     stage: cleanup
+.mch-cleanup-job:
+  when: always
+  variables:
+    GIT_STRATEGY: 'none'
+  script:
+    - !reference [.mch-sh-preamble, script]
+    - !reference [.mch-env-paths, script]
+    - !reference [.mch-cleanup, script]
+
+# ── uenv ─────────────────────────────────────────────────────────────────────
+
+# Pull uenv container images.
+#
+# uenv (https://www.uenv.io) provides containerized HPC software stacks
+# on clusters. Jobs that use uenv images need to pull them first; this
+# block handles that.
+#
+# Inputs (CI variables):
+#   MCH_UENV_IMAGE   image to pull (required, no default).
+#
+# Needs .mch-sh-preamble first (for banner()).
+
+.mch-pull-uenv:
+  script:
+    - |
+      banner "Pull uenv image"
+      if [ -z "${MCH_UENV_IMAGE:-}" ]; then
+        echo "Error: MCH_UENV_IMAGE is not set" >&2
+        exit 1
+      fi
+      echo "Pulling $MCH_UENV_IMAGE"
+      uenv image pull "$MCH_UENV_IMAGE"
+      echo "Successfully pulled $MCH_UENV_IMAGE"
+
+# ── uv ───────────────────────────────────────────────────────────────────────
+
+# Install uv, and build a project's venv with it.
+#
+# Bare-metal nodes have no uv: the job installs its own, pinned so that a new
+# uv release cannot change behavior unnoticed.
+#
+# Inputs (CI variables):
+#   MCH_UV_VERSION        uv version to install (default 0.11.32).
+#   UV_PYTHON_PREFERENCE  default only-managed: build on a uv-managed CPython,
+#                         never the node's /usr/bin/python3, which has no
+#                         Python.h (triton JIT-compiles against it). A missing
+#                         download then fails loudly instead of falling back.
+#   UV_PYTHON_DOWNLOADS   default automatic.
+#   MCH_UV_SYNC_ARGS      extra arguments for `uv sync` (.mch-uv-sync).
+
+# Needs .mch-env-paths first: uv goes to $HOME/.local/bin, already on PATH, so
+# a later job of the same pipeline finds it there and skips the download.
+.mch-install-uv:
+  script:
+    - |
+      banner "Install uv"
+      export UV_PYTHON_PREFERENCE="${UV_PYTHON_PREFERENCE:-only-managed}"
+      export UV_PYTHON_DOWNLOADS="${UV_PYTHON_DOWNLOADS:-automatic}"
+      uv_version="${MCH_UV_VERSION:-0.11.32}"
+      if [ -x "$HOME/.local/bin/uv" ] && [ "$("$HOME/.local/bin/uv" --version | cut -d' ' -f2)" = "$uv_version" ]; then
+        echo "uv $uv_version already in $HOME/.local/bin"
+      else
+        curl -LsSf "https://astral.sh/uv/${uv_version}/install.sh" \
+          | env UV_INSTALL_DIR="$HOME/.local/bin" INSTALLER_NO_MODIFY_PATH=1 sh
+      fi
+      uv --version
+
+# `uv sync` in the current directory. Needs .mch-install-uv.
+.mch-uv-sync:
+  script:
+    - |
+      banner "uv sync"
+      # shellcheck disable=SC2086  # MCH_UV_SYNC_ARGS is a word list on purpose
+      uv sync ${MCH_UV_SYNC_ARGS:-}
 
 # ── runners ──────────────────────────────────────────────────────────────────
 

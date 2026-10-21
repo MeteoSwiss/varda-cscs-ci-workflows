@@ -4,11 +4,11 @@
 #
 #   tests/flatten.sh [consumer.yml]     (default: examples/consumer.yml)
 #
-# A consumer includes the blocks from main on raw.githubusercontent.com, and
-# their nested includes point at main as well, so linting the consumer as-is
-# would test main, not the change under review. Instead the consumer's
-# includes of this repository are dropped and the blocks of this checkout are
-# merged in as GitLab merges includes: later files deep-merge over earlier
+# A consumer includes v1/.ci-ext-mch.yml from main on raw.githubusercontent.com,
+# and its nested include of cluster.yml points at main as well, so linting the
+# consumer as-is would test main, not the change under review. Instead the
+# consumer's includes of this repository are dropped and this checkout's files
+# are merged in as GitLab merges includes: later files deep-merge over earlier
 # ones, and the consumer's own keys win. Every other include (cscs-ci's
 # templates, the consumer's own) is kept for the linter to resolve. Needs
 # mikefarah yq v4.
@@ -16,8 +16,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 consumer="${1:-$root/examples/consumer.yml}"
-# The blocks, in GitLab's merge order: the `local` twins of .ci-ext-mch.yml's
-# nested includes (so a new block cannot be forgotten here), then the file itself.
+# Our files, in GitLab's merge order: the `local` twins of .ci-ext-mch.yml's
+# nested includes (cluster.yml), then the file itself.
 mapfile -t blocks < <(yq -r '.include[] | select(has("local")) | .local' "$root/v1/.ci-ext-mch.yml" | sed "s|^|$root|")
 blocks+=("$root/v1/.ci-ext-mch.yml")
 
