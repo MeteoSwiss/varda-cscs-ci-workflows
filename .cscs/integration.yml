@@ -20,11 +20,13 @@ selftest:
   variables:
     SLURM_TIMELIMIT: '00:10:00'
     MCH_WORK_NAME: 'mch-recipes-selftest'
+    MCH_UENV_IMAGE: 'fdb/5.21:v2'
   script:
     - !reference [.mch-sh-preamble, script]
     - !reference [.mch-log-ci-context, script]
     - !reference [.mch-env-paths, script]
     - !reference [.mch-log-tool-versions, script]
+    - !reference [.mch-pull-uenv, script]
     - !reference [.mch-install-uv, script]
     - |
       cp -r "$CI_PROJECT_DIR/tests/fixture" "$WORK/fixture"

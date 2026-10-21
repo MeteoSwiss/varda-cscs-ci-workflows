@@ -12,7 +12,7 @@ The repository is public because GitLab's `include: remote` cannot authenticate.
 - [Usage](#usage)
 - [Switching cluster](#switching-cluster)
 - [Building blocks](#building-blocks): [runners](#runners) · [shell](#shell-v1shellyml) ·
-  [env](#env-v1envyml) · [uv](#uv-v1uvyml)
+  [env](#env-v1envyml) · [uenv](#uenv-v1uenvyml) · [uv](#uv-v1uvyml)
 - [Versioning](#versioning)
 - [Migrating a repository](#migrating-a-repository)
 - [Testing](#testing)
@@ -124,6 +124,27 @@ cleanup:
 To work in the runner's build directory instead (single-job pipelines), set
 `MCH_WORK_DIR: $CI_PROJECT_DIR` — `.mch-cleanup` then refuses, by design.
 
+### uenv ([`v1/uenv.yml`](v1/uenv.yml))
+
+Pull containerized HPC software stacks from [uenv](https://www.uenv.io/).
+
+| Fragment | What it does | Inputs |
+|---|---|---|
+| `.mch-pull-uenv` | Pulls a uenv container image. Needs `.mch-sh-preamble`. | `MCH_UENV_IMAGE` (required, no default) |
+
+Example: set the image in your job's variables, then reference the block:
+
+```yaml
+mytest:
+  extends: [.baremetal-runner-mch]
+  variables:
+    MCH_UENV_IMAGE: 'fdb/5.21:v2'
+  script:
+    - !reference [.mch-sh-preamble, script]
+    - !reference [.mch-pull-uenv, script]
+    - uenv run <your command>
+```
+
 ### uv ([`v1/uv.yml`](v1/uv.yml))
 
 | Fragment | What it does | Inputs |
@@ -181,9 +202,10 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
   ([`.cscs/integration.yml`](.cscs/integration.yml)), status `cscs/integration`. It includes
   the blocks with `include: local`, and `v1/.ci-ext-mch.yml` switches its own nested
   includes to `local` inside this project, so the PR commit is what runs. One job, on
-  `.baremetal-runner-mch`, runs the preamble, the workdir, the uv install and a `uv sync`
-  on a uv-managed Python, then checks it landed on the cluster `cluster.yml` names — so a
-  PR that switches cluster is tested on the new cluster before it moves anyone.
+  `.baremetal-runner-mch`, runs the preamble, the workdir, pulls a uenv image, installs uv
+  and runs a `uv sync` on a uv-managed Python, then checks it landed on the cluster
+  `cluster.yml` names — so a PR that switches cluster is tested on the new cluster before
+  it moves anyone.
 
 cscs-ci does not run pipelines for PRs from forks: push branches to this repository.
 

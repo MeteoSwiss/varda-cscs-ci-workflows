@@ -35,6 +35,10 @@ include:
     rules: *mch-self
   - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/v1/env.yml'
     rules: *mch-other
+  - local: '/v1/uenv.yml'
+    rules: *mch-self
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/v1/uenv.yml'
+    rules: *mch-other
   - local: '/v1/uv.yml'
     rules: *mch-self
   - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/v1/uv.yml'
