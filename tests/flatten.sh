@@ -16,7 +16,10 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 consumer="${1:-$root/examples/consumer.yml}"
-blocks=("$root/cluster.yml" "$root/v1/shell.yml" "$root/v1/env.yml" "$root/v1/uv.yml" "$root/v1/.ci-ext-mch.yml")
+# The blocks, in GitLab's merge order: the `local` twins of .ci-ext-mch.yml's
+# nested includes (so a new block cannot be forgotten here), then the file itself.
+mapfile -t blocks < <(yq -r '.include[] | select(has("local")) | .local' "$root/v1/.ci-ext-mch.yml" | sed "s|^|$root|")
+blocks+=("$root/v1/.ci-ext-mch.yml")
 
 # Includes of this repository: any `local` in our own files, any remote URL of ours.
 ours='(type == "!!map" and ((has("local") and $f != "consumer") or ((.remote // "") | test("MeteoSwiss/varda-cscs-ci-workflows/"))))

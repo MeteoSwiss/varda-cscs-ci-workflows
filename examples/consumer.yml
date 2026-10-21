@@ -16,6 +16,7 @@ stages:
   variables:
     SLURM_TIMELIMIT: '00:30:00'
     MCH_WORK_NAME: 'example-ci'
+    MCH_UENV_IMAGE: 'fdb/5.21:v2'
 
 setup:
   extends: [.runner]
@@ -25,6 +26,7 @@ setup:
     - !reference [.mch-log-ci-context, script]
     - !reference [.mch-env-paths, script]
     - !reference [.mch-log-tool-versions, script]
+    - !reference [.mch-pull-uenv, script]
     - !reference [.mch-install-uv, script]
     - |
       cp -r "$CI_PROJECT_DIR/." "$WORK/src"

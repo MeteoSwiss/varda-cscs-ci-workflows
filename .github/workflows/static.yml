@@ -43,6 +43,15 @@ jobs:
       # shellcheck and yq (mikefarah v4) are preinstalled on ubuntu-latest.
       - run: tests/shellcheck.sh
 
+  includes:
+    name: includes on main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Every URL to this repository names main, and .ci-ext-mch.yml's local and
+      # remote includes match. yq (mikefarah v4) is preinstalled on ubuntu-latest.
+      - run: tests/includes.sh
+
   gitlab-lint:
     name: gitlab lint
     runs-on: ubuntu-latest

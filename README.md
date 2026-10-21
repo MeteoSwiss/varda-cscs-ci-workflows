@@ -191,6 +191,8 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
   - `gitlab-ci schema` — GitLab's CI JSON schema (`check-jsonschema`) per file and on the
     merged example consumer;
   - `shellcheck` — every script block, extracted by [`tests/shellcheck.sh`](tests/shellcheck.sh);
+  - `includes on main` — every URL to this repository names `main`, and the `local` and
+    `remote` includes of `v1/.ci-ext-mch.yml` match ([`tests/includes.sh`](tests/includes.sh));
   - `gitlab lint` — GitLab's own linter (`POST /projects/:id/ci/lint`) on the example
     consumer merged with the blocks of the PR ([`tests/gitlab-lint.sh`](tests/gitlab-lint.sh));
   - `merged pipeline` — `gitlab-ci-local --list` on the same merged file, which resolves
@@ -214,6 +216,7 @@ Run the token-free checks locally with:
 ```bash
 uvx yamllint --strict .
 tests/shellcheck.sh
+tests/includes.sh
 tests/flatten.sh > /tmp/merged.gitlab-ci.yml
 uvx check-jsonschema --builtin-schema vendor.gitlab-ci --data-transform gitlab-ci --regex-variant nonunicode \
   cluster.yml v1/*.yml v1/.ci-ext-mch.yml .cscs/*.yml examples/*.yml /tmp/merged.gitlab-ci.yml

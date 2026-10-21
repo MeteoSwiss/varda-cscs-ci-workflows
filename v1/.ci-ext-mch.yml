@@ -1,10 +1,11 @@
 # v1/.ci-ext-mch.yml — the one file a consumer includes:
 #
 #   include:
-#     - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/v1/.ci-ext-mch.yml'
+#     - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/.ci-ext-mch.yml'
 #
 # It pulls in cscs-ci's own templates, the cluster switch (../cluster.yml) and
-# every v1 building block (shell.yml, env.yml, uv.yml), and defines the runners.
+# every v1 building block (shell.yml, env.yml, uenv.yml, uv.yml), and defines the
+# runners.
 #
 # Nested includes of a remotely included file cannot be `local` (they would
 # resolve in the *consumer's* project), so each of our files is included twice
@@ -25,23 +26,23 @@ include:
   - remote: 'https://gitlab.com/cscs-ci/recipes/-/raw/master/templates/v2/.ci-ext.yml'
   - local: '/cluster.yml'
     rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/cluster.yml'
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/cluster.yml'
     rules: *mch-other
   - local: '/v1/shell.yml'
     rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/v1/shell.yml'
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/shell.yml'
     rules: *mch-other
   - local: '/v1/env.yml'
     rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/v1/env.yml'
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/env.yml'
     rules: *mch-other
   - local: '/v1/uenv.yml'
     rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/v1/uenv.yml'
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/uenv.yml'
     rules: *mch-other
   - local: '/v1/uv.yml'
     rules: *mch-self
-  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/init/v1/uv.yml'
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/uv.yml'
     rules: *mch-other
 
 # ── runners ──────────────────────────────────────────────────────────────────
