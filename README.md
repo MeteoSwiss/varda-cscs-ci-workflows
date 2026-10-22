@@ -11,8 +11,8 @@ The repository is public because GitLab's `include: remote` cannot authenticate.
 
 - [Usage](#usage)
 - [Switching cluster](#switching-cluster)
-- [Building blocks](#building-blocks): [runners](#runners) · [shell](#shell-v1shellyml) ·
-  [env](#env-v1envyml) · [uenv](#uenv-v1uenvyml) · [uv](#uv-v1uvyml)
+- [Building blocks](#building-blocks): [runners](#runners) · [shell](#shell) · [env](#env) ·
+  [uenv](#uenv) · [uv](#uv)
 - [Versioning](#versioning)
 - [Migrating a repository](#migrating-a-repository)
 - [Testing](#testing)
@@ -78,9 +78,10 @@ workspace needs a `<cluster>-gpu` dependency group for it. A job that must not m
 
 ## Building blocks
 
-### Runners
+All of v1 is defined in one file, [`v1/.ci-ext-mch.yml`](v1/.ci-ext-mch.yml), one
+section per block; only the cluster switch, `cluster.yml`, is a file of its own.
 
-Defined in [`v1/.ci-ext-mch.yml`](v1/.ci-ext-mch.yml).
+### Runners
 
 | Name | Lands on |
 |---|---|
@@ -93,7 +94,7 @@ inherited) and set `F7T_URL: https://api.cscs.ch/mch/firecrest/v2`, `ARCH: x86_6
 `SLURM_JOB_NUM_NODES: 1`, `SLURM_NTASKS: 1`. Everything else is cscs-ci's default —
 notably `SLURM_TIMELIMIT: 00:15:00`; override what your job needs in its `variables:`.
 
-### shell ([`v1/shell.yml`](v1/shell.yml))
+### shell
 
 | Fragment | What it does | Inputs |
 |---|---|---|
@@ -103,7 +104,7 @@ notably `SLURM_TIMELIMIT: 00:15:00`; override what your job needs in its `variab
 | `.mch-verify-main` | Fails unless the pipeline runs on `main` — for pipelines that publish. | – |
 | `.mch-assert-cluster` | Fails unless the job runs on the expected cluster (`CLUSTER_NAME`, then `scontrol`). | `MCH_EXPECTED_CLUSTER` (default `$FIRECREST_SYSTEM`) |
 
-### env ([`v1/env.yml`](v1/env.yml))
+### env
 
 Compute nodes have no mounted home, so HOME moves into a per-pipeline workdir on
 `$SCRATCH`. `$SCRATCH` is on every node and `CI_PIPELINE_ID` is the same in every job,
@@ -124,7 +125,7 @@ cleanup:
 To work in the runner's build directory instead (single-job pipelines), set
 `MCH_WORK_DIR: $CI_PROJECT_DIR` — `.mch-cleanup` then refuses, by design.
 
-### uenv ([`v1/uenv.yml`](v1/uenv.yml))
+### uenv
 
 Pull containerized HPC software stacks from [uenv](https://www.uenv.io/).
 
@@ -145,7 +146,7 @@ mytest:
     - uenv run <your command>
 ```
 
-### uv ([`v1/uv.yml`](v1/uv.yml))
+### uv
 
 | Fragment | What it does | Inputs |
 |---|---|---|
@@ -191,6 +192,8 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
   - `gitlab-ci schema` — GitLab's CI JSON schema (`check-jsonschema`) per file and on the
     merged example consumer;
   - `shellcheck` — every script block, extracted by [`tests/shellcheck.sh`](tests/shellcheck.sh);
+  - `includes on main` — every URL to this repository names `main`, and the `local` and
+    `remote` includes of `v1/.ci-ext-mch.yml` match ([`tests/includes.sh`](tests/includes.sh));
   - `gitlab lint` — GitLab's own linter (`POST /projects/:id/ci/lint`) on the example
     consumer merged with the blocks of the PR ([`tests/gitlab-lint.sh`](tests/gitlab-lint.sh));
   - `merged pipeline` — `gitlab-ci-local --list` on the same merged file, which resolves
@@ -200,8 +203,9 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
   [`tests/flatten.sh`](tests/flatten.sh) instead merges the checkout's blocks into it.
 - **Integration test** — this repository's own cscs-ci pipeline `integration`
   ([`.cscs/integration.yml`](.cscs/integration.yml)), status `cscs/integration`. It includes
-  the blocks with `include: local`, and `v1/.ci-ext-mch.yml` switches its own nested
-  includes to `local` inside this project, so the PR commit is what runs. One job, on
+  `v1/.ci-ext-mch.yml` with `include: local`, so the PR's blocks are what runs; inside
+  this project the file also switches its nested include of `cluster.yml` to `local`
+  (once `.mch-self-project` holds the mirror's project id). One job, on
   `.baremetal-runner-mch`, runs the preamble, the workdir, pulls a uenv image, installs uv
   and runs a `uv sync` on a uv-managed Python, then checks it landed on the cluster
   `cluster.yml` names — so a PR that switches cluster is tested on the new cluster before
@@ -214,9 +218,10 @@ Run the token-free checks locally with:
 ```bash
 uvx yamllint --strict .
 tests/shellcheck.sh
+tests/includes.sh
 tests/flatten.sh > /tmp/merged.gitlab-ci.yml
 uvx check-jsonschema --builtin-schema vendor.gitlab-ci --data-transform gitlab-ci --regex-variant nonunicode \
-  cluster.yml v1/*.yml v1/.ci-ext-mch.yml .cscs/*.yml examples/*.yml /tmp/merged.gitlab-ci.yml
+  cluster.yml v1/.ci-ext-mch.yml .cscs/*.yml examples/*.yml /tmp/merged.gitlab-ci.yml
 ```
 
 ## License

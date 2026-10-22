@@ -33,7 +33,7 @@ jobs:
           tests/flatten.sh > "$RUNNER_TEMP/consumer.gitlab-ci.yml"
           uvx check-jsonschema --builtin-schema vendor.gitlab-ci --data-transform gitlab-ci \
             --regex-variant nonunicode \
-            cluster.yml v1/*.yml v1/.ci-ext-mch.yml .cscs/*.yml examples/*.yml \
+            cluster.yml v1/.ci-ext-mch.yml .cscs/*.yml examples/*.yml \
             "$RUNNER_TEMP/consumer.gitlab-ci.yml"
 
   shellcheck:
@@ -42,6 +42,15 @@ jobs:
       - uses: actions/checkout@v5
       # shellcheck and yq (mikefarah v4) are preinstalled on ubuntu-latest.
       - run: tests/shellcheck.sh
+
+  includes:
+    name: includes on main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Every URL to this repository names main, and .ci-ext-mch.yml's local and
+      # remote includes match. yq (mikefarah v4) is preinstalled on ubuntu-latest.
+      - run: tests/includes.sh
 
   gitlab-lint:
     name: gitlab lint
