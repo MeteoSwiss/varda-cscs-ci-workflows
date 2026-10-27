@@ -1,0 +1,100 @@
+name: Trigger a CSCS-CI pipeline
+
+# Reusable workflow: starts one of the caller's CSCS-CI pipelines through the
+# API-call trigger (https://docs.cscs.ch/services/cicd/#api-call-triggering)
+# and returns as soon as the pipeline is created — it does not wait for it.
+#
+#   jobs:
+#     release:
+#       uses: MeteoSwiss/varda-cscs-ci-workflows/.github/workflows/trigger-cscs-ci.yml@main
+#       with:
+#         pipeline: release
+#         variables: |
+#           MODEL: ${{ toJSON(inputs.model) }}
+#       secrets:
+#         CSCS_CI_REPOSITORY_ID: ${{ secrets.CSCS_CI_REPOSITORY_ID }}
+#         CSCS_CI_WEBHOOK_SECRET: ${{ secrets.CSCS_CI_WEBHOOK_SECRET }}
+#         SECRET_VARIABLES: |
+#           MLFLOW_TRACKING_TOKEN: ${{ toJSON(inputs.mlflow_tracking_token) }}
+#
+# Wrap every interpolated value in toJSON(): it quotes it, so a value with a
+# colon or a quote in it stays one YAML string.
+
+on:
+  workflow_call:
+    inputs:
+      pipeline:
+        description: "Name of the CSCS-CI pipeline to run, as configured in the caller's CSCS-CI project."
+        required: true
+        type: string
+      variables:
+        description: "CI variables for the pipeline, as a YAML mapping of strings. Shown in the log."
+        required: false
+        type: string
+        default: '{}'
+      ref:
+        description: "Git ref the pipeline runs on (default: the ref the caller runs on)."
+        required: false
+        type: string
+        default: ''
+      main-only:
+        description: "Refuse to trigger unless the caller runs on main."
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      CSCS_CI_REPOSITORY_ID:
+        required: true
+      CSCS_CI_WEBHOOK_SECRET:
+        required: true
+      SECRET_VARIABLES:
+        description: "More CI variables, as a YAML mapping of strings, masked in the log."
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    name: Trigger the CSCS-CI "${{ inputs.pipeline }}" pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure main branch
+        if: inputs.main-only
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::This workflow can only be run from the main branch (got $GITHUB_REF)."
+            exit 1
+          fi
+      - name: Trigger the pipeline
+        env:
+          PIPELINE: ${{ inputs.pipeline }}
+          REF: ${{ inputs.ref }}
+          VARIABLES: ${{ inputs.variables }}
+          SECRET_VARIABLES: ${{ secrets.SECRET_VARIABLES }}
+          CSCS_CI_REPOSITORY_ID: ${{ secrets.CSCS_CI_REPOSITORY_ID }}
+          CSCS_CI_WEBHOOK_SECRET: ${{ secrets.CSCS_CI_WEBHOOK_SECRET }}
+        # yq (mikefarah v4) and jq are preinstalled on ubuntu-latest.
+        run: |
+          set -euo pipefail
+          to_json() { printf '%s' "${1:-}" | yq -p yaml -o json -I0 '(. // {}) | map_values(tostring)'; }
+          vars="$(to_json "$VARIABLES")"
+          secret_vars="$(to_json "$SECRET_VARIABLES")"
+          # Mask every non-empty secret value before anything could print it.
+          jq -r '.[] | select(. != "")' <<<"$secret_vars" | while IFS= read -r v; do
+            echo "::add-mask::$v"
+          done
+          echo "pipeline=$PIPELINE ref=${REF:-$GITHUB_REF_NAME}"
+          echo "variables: $vars"
+          echo "secret variables: $(jq -c 'keys' <<<"$secret_vars")"
+
+          umask 077
+          jq -n --arg ref "${REF:-$GITHUB_REF_NAME}" --arg pipeline "$PIPELINE" \
+                --argjson vars "$vars" --argjson secret_vars "$secret_vars" \
+                '{ref: $ref, pipeline: $pipeline, variables: ($vars + $secret_vars)}' \
+            | yq -p json -o yaml > "$RUNNER_TEMP/data.yaml"
+          curl -sSf -X POST \
+            -u "${CSCS_CI_REPOSITORY_ID}:${CSCS_CI_WEBHOOK_SECRET}" \
+            --data-binary @"$RUNNER_TEMP/data.yaml" \
+            https://cicd-ext-mw.cscs.ch/ci/pipeline/trigger
+          rm -f "$RUNNER_TEMP/data.yaml"

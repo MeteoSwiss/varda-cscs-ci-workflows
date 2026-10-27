@@ -1,0 +1,9 @@
+# examples/devml-register.yml — a devml workspace's `register` pipeline
+# (.cscs-ci/register.yaml), whole. MODEL comes from the trigger
+# (.github/workflows/trigger-cscs-ci.yml). Linted on every PR.
+
+include:
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/.ci-ext-mch.yml'
+
+register:
+  extends: [.mch-devml-register-job]

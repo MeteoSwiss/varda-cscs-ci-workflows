@@ -1,0 +1,55 @@
+# examples/devml-tests.yml — a devml workspace's E2E smoke pipeline
+# (.cscs-ci/tests.yaml): one job builds the workspace, the next ones reuse it,
+# cleanup runs in any case. Only what is run is the workspace's own. Linted on
+# every PR.
+
+include:
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/.ci-ext-mch.yml'
+
+stages:
+  - setup
+  - training
+  - inference
+  - cleanup
+
+setup:
+  extends: [.mch-devml-runner]
+  stage: setup
+  script:
+    - !reference [.mch-sh-preamble, script]
+    - !reference [.mch-log-ci-context, script]
+    - !reference [.mch-env-paths, script]
+    - !reference [.mch-devml-setup, script]
+
+training:
+  extends: [.mch-devml-runner]
+  stage: training
+  needs: [setup]
+  script:
+    - !reference [.mch-sh-preamble, script]
+    - !reference [.mch-log-ci-context, script]
+    - !reference [.mch-env-paths, script]
+    - !reference [.mch-devml-reuse, script]
+    - |
+      banner "Run training"
+      # Reproducible seed — anemoi otherwise derives it from SLURM_JOB_ID.
+      export ANEMOI_BASE_SEED=42
+      env -u SLURM_JOB_ID WORKSPACE_DIR="$WS" just srun debug-singlegpu \
+        anemoi-training train --config-path "$WS/configs/training" --config-name my_training_test
+
+inference:
+  extends: [.mch-devml-runner]
+  stage: inference
+  needs: [setup]
+  script:
+    - !reference [.mch-sh-preamble, script]
+    - !reference [.mch-log-ci-context, script]
+    - !reference [.mch-env-paths, script]
+    - !reference [.mch-devml-reuse, script]
+    - |
+      banner "Run inference"
+      env -u SLURM_JOB_ID WORKSPACE_DIR="$WS" just srun debug-singlegpu anemoi-inference run configs/inference/forecast.yaml
+
+cleanup:
+  extends: [.mch-devml-runner, .mch-cleanup-job]
+  stage: cleanup

@@ -1,4 +1,4 @@
-# .cscs/integration.yml — this repository's own cscs-ci pipeline "integration".
+# .cscs-ci/integration.yml — this repository's own cscs-ci pipeline "integration".
 # Runs automatically on every PR to main and every push to main; its result is
 # the `cscs/integration` status that branch protection requires.
 #
