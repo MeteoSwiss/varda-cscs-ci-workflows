@@ -173,7 +173,7 @@ a later job of the pipeline finds them again.
 | `.mch-devml-setup` | Paths, tool versions, git auth, clone devml, tooling (pinned uv, just, devml's tooling venv), fetch + pin + `workspace-check` + `just sync`. Leaves cwd at `$DEVML`. Needs `.mch-sh-preamble`, `.mch-env-paths`. |
 | `.mch-devml-reuse` | In a later job: re-derives `$DEVML`/`$WS`, checks setup's just, workspace and venv are there, cd `$DEVML`. Needs the same. |
 | `.mch-devml-release-job` | The whole `release` pipeline: `model_release.py` registers `MODEL` into MLflow, the result goes into `workspace.yaml`'s `release` block, which is committed if it changed, and a `<version>.<patch>` tag is pushed. Main only; one at a time (`resource_group: model-release`). |
-| `.mch-devml-register-job` | The whole `register` pipeline: `just model-register` copies `MODEL` into the store, the `model/<name>` tag is pushed — or the copy is removed again if the push fails. Main only; one at a time (`resource_group: model-register`). |
+| `.mch-devml-register-job` | The whole `register` pipeline: `just model-register` copies `MODEL` into the store, the `model/<name>` tag is pushed — or the model is unregistered again (`just model-unregister`) if the push fails. Main only; one at a time (`resource_group: model-register`). |
 
 `.mch-devml-setup` is built from `.mch-devml-paths`, `.mch-devml-git-auth`,
 `.mch-devml-clone`, `.mch-devml-tooling` and `.mch-devml-workspace`, which can be

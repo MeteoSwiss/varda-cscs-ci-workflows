@@ -341,8 +341,8 @@ include:
 
 # Fetch the workspace at the CI commit into $WS, pin devml to the ref it
 # declares compatible (dev-ref, else the newest tag satisfying devml.requires,
-# else main), check the contract and, unless MCH_DEVML_SYNC is false, build the
-# venv. Run in $DEVML.
+# else main), converge devml's tooling env for that ref, check the contract and,
+# unless MCH_DEVML_SYNC is false, build the venv. Run in $DEVML.
 .mch-devml-workspace:
   script:
     - |
@@ -356,6 +356,9 @@ include:
       devml_ref="$(just workspace-devml-ref "$WS")"
       echo "devml ref: $devml_ref"
       git checkout "$devml_ref"
+      # Converge the tooling env for the pinned ref — a no-op when its
+      # requirements did not change between main and the ref.
+      ./hpc/bin/setup.sh --tooling --yes
 
       banner "workspace-check"
       WORKSPACE_DIR="$WS" just workspace-check
@@ -558,12 +561,15 @@ include:
         banner "Push"
         # model-register tagged the commit it registered from; nothing else
         # changed. The model is already in the store, so a failed push takes it
-        # back out — and out of the store's index, which a rebuild re-reads from
-        # the directories that are there.
+        # back out, with the command a human runs: it tombstones the store copy
+        # first, updates the index and deletes the checkpoints last, so a
+        # half-failed cleanup never loses data behind a live name. --no-git: the
+        # tag never reached the remote, and this clone is discarded anyway.
         if ! git push orig "refs/tags/model/$name"; then
-          echo "push failed — removing $store/$name again" >&2
-          rm -rf "${store:?}/${name:?}"
-          just model-list --rebuild --store "$store" >/dev/null || true
+          echo "push failed — unregistering $name again" >&2
+          WORKSPACE_DIR="$WS" just model-unregister "$name" --yes --no-git \
+            --store "$store" --reason "ci: tag push rejected" \
+            || echo "unregister failed too — clean up by hand: just model-unregister $name" >&2
           exit 1
         fi
         echo "Registered $MODEL as $name"
