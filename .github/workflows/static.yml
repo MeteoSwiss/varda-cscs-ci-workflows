@@ -27,14 +27,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
-      # Per file, plus the merged consumer: GitLab's JSON schema for CI files,
-      # with `!reference` understood (--data-transform gitlab-ci).
+      # Per file, plus each example merged with the blocks: GitLab's JSON schema
+      # for CI files, with `!reference` understood (--data-transform gitlab-ci).
       - run: |
-          tests/flatten.sh > "$RUNNER_TEMP/consumer.gitlab-ci.yml"
+          for f in examples/*.yml; do
+            tests/flatten.sh "$f" > "$RUNNER_TEMP/$(basename "$f" .yml).merged.yml"
+          done
           uvx check-jsonschema --builtin-schema vendor.gitlab-ci --data-transform gitlab-ci \
             --regex-variant nonunicode \
-            cluster.yml v1/.ci-ext-mch.yml .cscs/*.yml examples/*.yml \
-            "$RUNNER_TEMP/consumer.gitlab-ci.yml"
+            cluster.yml v1/.ci-ext-mch.yml .cscs-ci/*.yml examples/*.yml \
+            "$RUNNER_TEMP"/*.merged.yml
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -57,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: GitLab CI lint of the example consumer
+      - name: GitLab CI lint of the example consumers
         env:
           GITLAB_LINT_TOKEN: ${{ secrets.GITLAB_LINT_TOKEN }}
           GITLAB_LINT_PROJECT_ID: ${{ vars.GITLAB_LINT_PROJECT_ID }}
@@ -67,7 +69,7 @@ jobs:
             echo "::warning::GITLAB_LINT_TOKEN / GITLAB_LINT_PROJECT_ID not available — skipped"
             exit 0
           fi
-          tests/gitlab-lint.sh
+          for f in examples/*.yml; do tests/gitlab-lint.sh "$f"; done
 
   merged:
     name: merged pipeline
@@ -80,5 +82,18 @@ jobs:
       # Token-free check that `extends` and `!reference` resolve across the
       # merged files: gitlab-ci-local builds the pipeline and lists its jobs.
       - run: |
-          tests/flatten.sh > .gitlab-ci-merged.yml
-          npx --yes gitlab-ci-local@4 --file .gitlab-ci-merged.yml --list
+          for f in examples/*.yml; do
+            echo "== $f"
+            tests/flatten.sh "$f" > .gitlab-ci-merged.yml
+            npx --yes gitlab-ci-local@4 --file .gitlab-ci-merged.yml --list
+          done
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # The GitHub workflows, the reusable trigger-cscs-ci.yml among them; their
+      # run: blocks go through the preinstalled shellcheck.
+      - run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color

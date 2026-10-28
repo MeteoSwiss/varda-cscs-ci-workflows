@@ -3,7 +3,7 @@
 #   include:
 #     - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/.ci-ext-mch.yml'
 #
-# It holds every v1 building block (shell, env, uenv, uv) and the runners, and
+# It holds every v1 building block (shell, env, uenv, uv, devml) and the runners, and
 # includes cscs-ci's own templates and the cluster switch (../cluster.yml). A
 # consumer pointed at a branch of this file therefore runs that branch's blocks.
 #
@@ -148,6 +148,38 @@ include:
       echo "removing $WORK"
       rm -rf "${WORK:?}"
 
+# Remove $WORK however the script ends — success, a failed command, or a cancel
+# (the runner sends TERM) — so a single-job pipeline never leaves its workdir on
+# $SCRATCH. Reference it right after .mch-env-paths; a final .mch-cleanup is
+# then optional. Not for a job whose $WORK a later job of the pipeline still
+# needs (use .mch-cleanup-job there). A SIGKILL cannot be trapped.
+#
+# Inputs (CI variables):
+#   MCH_KEEP_WORK  true: keep $WORK, e.g. to inspect a failed run (default false).
+.mch-cleanup-on-exit:
+  script:
+    - |
+      mch_cleanup_on_exit() {
+        local status=$?
+        if [ "${MCH_KEEP_WORK:-false}" = true ]; then
+          echo "MCH_KEEP_WORK=true — leaving $WORK (exit $status)"
+          return
+        fi
+        case "${WORK:-}" in
+          ""|/|"${SCRATCH:-/}"|"${SCRATCH:-/}/"|"${CI_PROJECT_DIR:-/}")
+            echo "refusing to remove WORK='${WORK:-}'" >&2
+            return ;;
+        esac
+        if [ -d "$WORK" ]; then
+          echo "removing $WORK (exit $status)"
+          rm -rf "${WORK:?}"
+        fi
+      }
+      trap mch_cleanup_on_exit EXIT
+      # TERM and INT end bash without running the EXIT trap; turn them into an exit.
+      trap 'exit 143' TERM
+      trap 'exit 130' INT
+
 # A whole cleanup job. It runs even when earlier jobs failed, so a workdir never
 # leaks. Add the runner and the stage:
 #
@@ -257,3 +289,324 @@ include:
   extends: [.mch-baremetal-base]
   variables:
     FIRECREST_SYSTEM: 'linard'
+
+# ── devml ────────────────────────────────────────────────────────────────────
+
+# Jobs of devml workspaces (https://github.com/MeteoSwiss/devml): clone devml,
+# fetch the workspace at the CI commit, pin devml to the ref the workspace's
+# workspace.yaml declares, and build its venv — then test, register or release
+# its models.
+#
+# devml clones the workspace itself (`just workspace-fetch`), so these jobs need
+# no checkout of their own (GIT_STRATEGY none). Everything lives in the
+# per-pipeline $WORK of .mch-env-paths: devml at $DEVML, the workspace inside it
+# at $WS. A later job of the same pipeline re-derives both paths and reuses them.
+#
+# Inputs (CI variables):
+#   MCH_DEVML_REPO        devml clone URL (default git@github.com:MeteoSwiss/devml.git).
+#   MCH_DEVML_SSH_KEY     SSH key for GitHub (default $SCRATCH/.ssh/id_ed25519).
+#   MCH_DEVML_GIT_EMAIL   committer of release commits and tags
+#   MCH_DEVML_GIT_NAME    (default cscs-ci@meteoswiss.ch, CSCS CI).
+#   MCH_DEVML_SETUP_ARGS  devml's hpc/bin/setup.sh actions
+#                         (default --just --tooling --anemoi-settings).
+#   MCH_DEVML_SYNC        build the workspace venv with `just sync` (default true).
+#   MCH_DEVML_STORE       model store of register (default /store_new/mch/msopr/ml/models).
+#   MCH_DEVML_DRY_RUN     true: release and register check everything, then
+#                         write nothing — no MLflow, store copy, commit, tag or
+#                         push — and may run off main (default false).
+# Exports: DEVML, WS, GIT_SSH_COMMAND.
+
+# What every devml job shares: no checkout (devml fetches the workspace), and
+# time for `just sync`, which downloads a managed Python and the cu124
+# torch/PyG stack.
+.mch-devml-runner:
+  extends: [.baremetal-runner-mch]
+  variables:
+    GIT_STRATEGY: 'none'
+    SLURM_TIMELIMIT: '00:45:00'
+
+# Where devml and the workspace live. Needs .mch-env-paths.
+.mch-devml-paths:
+  script:
+    - |
+      export DEVML="$WORK/devml"
+      export WS="$WORK/devml/workspace"
+      echo "DEVML=$DEVML  WS=$WS"
+
+# Git auth: SSH with the CI key for devml (GitHub), a credential helper written
+# from $CI_JOB_TOKEN for the workspace's mirror on the CI server, and an
+# identity for the commits and tags a release makes. The token only ever goes
+# into the credentials file, never a URL or the log. Needs .mch-env-paths.
+.mch-devml-git-auth:
+  script:
+    - |
+      banner "Configure git auth (token redacted)"
+      # known_hosts goes to /dev/null: there is no ~/.ssh to warn about or prompt for.
+      GIT_SSH_COMMAND="ssh -i ${MCH_DEVML_SSH_KEY:-$SCRATCH/.ssh/id_ed25519} -o IdentitiesOnly=yes"
+      GIT_SSH_COMMAND+=" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR"
+      export GIT_SSH_COMMAND
+      git config --global credential.helper store
+      ( umask 077; printf 'https://gitlab-ci-token:%s@%s\n' "$CI_JOB_TOKEN" "$CI_SERVER_HOST" > "$HOME/.git-credentials" )
+      git config --global user.email "${MCH_DEVML_GIT_EMAIL:-cscs-ci@meteoswiss.ch}"
+      git config --global user.name "${MCH_DEVML_GIT_NAME:-CSCS CI}"
+
+# Clone devml into $DEVML and enter it. Its default branch: .mch-devml-workspace
+# then checks out the ref the workspace asks for.
+.mch-devml-clone:
+  script:
+    - |
+      banner "Clone devml"
+      git clone "${MCH_DEVML_REPO:-git@github.com:MeteoSwiss/devml.git}" "$DEVML"
+      cd "$DEVML"
+
+# The pinned uv, then just and devml's tooling venv (the interpreter every
+# devml script runs on) and anemoi's dataset-catalog settings. setup.sh keeps
+# the uv it finds on PATH. Run in $DEVML.
+.mch-devml-tooling:
+  script:
+    - !reference [.mch-install-uv, script]
+    - |
+      banner "Install just + devml tooling"
+      # shellcheck disable=SC2086  # MCH_DEVML_SETUP_ARGS is a word list on purpose
+      ./hpc/bin/setup.sh ${MCH_DEVML_SETUP_ARGS:---just --tooling --anemoi-settings} --yes
+      just --version
+
+# Fetch the workspace at the CI commit into $WS, pin devml to the ref it
+# declares compatible (dev-ref, else the newest tag satisfying devml.requires,
+# else main), converge devml's tooling env for that ref, check the contract and,
+# unless MCH_DEVML_SYNC is false, build the venv. Run in $DEVML.
+.mch-devml-workspace:
+  script:
+    - |
+      banner "Fetch workspace @ $CI_COMMIT_SHA"
+      # Tokenless URL: auth comes from the credential helper.
+      out="$(just workspace-fetch "${CI_SERVER_URL}/${CI_PROJECT_PATH}.git" "$CI_COMMIT_SHA" workspace)"
+      test "$out" = "$WS" && test -d "$WS"
+      echo "workspace: $WS"
+
+      banner "Pin devml to the workspace's compatible ref"
+      devml_ref="$(just workspace-devml-ref "$WS")"
+      echo "devml ref: $devml_ref"
+      git checkout "$devml_ref"
+      # Converge the tooling env for the pinned ref — a no-op when its
+      # requirements did not change between main and the ref.
+      ./hpc/bin/setup.sh --tooling --yes
+
+      banner "workspace-check"
+      WORKSPACE_DIR="$WS" just workspace-check
+      if [ "${MCH_DEVML_SYNC:-true}" = true ]; then
+        banner "just sync"
+        WORKSPACE_DIR="$WS" just sync
+      fi
+
+# Everything above, in order: a workspace ready to use at $WS, with cwd $DEVML.
+# Needs .mch-sh-preamble and .mch-env-paths.
+.mch-devml-setup:
+  script:
+    - !reference [.mch-devml-paths, script]
+    - !reference [.mch-log-tool-versions, script]
+    - !reference [.mch-devml-git-auth, script]
+    - !reference [.mch-devml-clone, script]
+    - !reference [.mch-devml-tooling, script]
+    - !reference [.mch-devml-workspace, script]
+
+# For a later job of the pipeline: reuse what .mch-devml-setup built, with cwd
+# $DEVML, or fail saying what is missing. The uv install is a no-op there, but
+# exports the uv Python settings for `just`. Needs .mch-sh-preamble and
+# .mch-env-paths.
+.mch-devml-reuse:
+  script:
+    - !reference [.mch-devml-paths, script]
+    - !reference [.mch-install-uv, script]
+    - |
+      banner "Reuse the environment of setup ($WORK)"
+      test -x "$HOME/.local/bin/just" || { echo "no just under $HOME — did setup run?" >&2; exit 1; }
+      test -d "$WS" || { echo "no workspace at $WS — did setup run?" >&2; exit 1; }
+      if [ "${MCH_DEVML_SYNC:-true}" = true ]; then
+        test -x "$WS/.venv/bin/python" || { echo "no venv at $WS/.venv — did setup's sync succeed?" >&2; exit 1; }
+      fi
+      cd "$DEVML"
+
+# Fail unless the pipeline runs on main — except for a dry run, which writes
+# nothing and so may run anywhere.
+.mch-devml-verify-main:
+  script:
+    - |
+      if [ "${MCH_DEVML_DRY_RUN:-false}" = true ]; then
+        banner "Dry run: nothing is written, any branch will do (${CI_COMMIT_REF_NAME:-?})"
+      else
+        banner "Verify trigger is on main"
+        if [ "${CI_COMMIT_BRANCH:-}" != "main" ]; then
+          echo "This pipeline can only be triggered from main (got '${CI_COMMIT_BRANCH:-<none>}')." >&2
+          exit 1
+        fi
+      fi
+
+# workspace-fetch leaves the workspace at a detached SHA: put it back on the CI
+# branch, and add the real origin (not the CI server's mirror) as `orig` to push
+# to. Leaves cwd at $WS.
+.mch-devml-checkout-branch:
+  script:
+    - |
+      banner "Check out the CI branch in the workspace"
+      cd "$WS"
+      git checkout -B "${CI_COMMIT_BRANCH:-$CI_COMMIT_REF_NAME}"
+      git remote add orig "$CSCS_CI_ORIG_CLONE_URL"
+
+# The `release` pipeline, whole: register a model of workspace.yaml's `models`
+# into MLflow with devml's scripts/model_release.py, write the result into
+# workspace.yaml's `release` block, commit that if it changed and push a new
+# <version>.<patch> tag — from main only. The consumer's job is just:
+#
+#   release:
+#     extends: [.mch-devml-release-job]
+#
+# Inputs, usually from the trigger: MODEL (required, a key under models:),
+# MLFLOW_TRACKING_TOKEN (only needed when the checkpoint changed), MLFLOW_RUN_ID
+# and MLFLOW_TRACKING_URI (overrides). No `just sync`: model_release.py brings
+# its own dependencies. Pushing to main and tags needs the CI job token to have
+# push rights on protected branches. $WORK is removed however the job ends
+# (.mch-cleanup-on-exit; MCH_KEEP_WORK=true keeps it).
+.mch-devml-release-job:
+  extends: [.mch-devml-runner]
+  # Two releases at once would race for the same tag.
+  resource_group: model-release
+  variables:
+    MODEL: ''
+    MLFLOW_TRACKING_TOKEN: ''
+    MLFLOW_RUN_ID: ''
+    MLFLOW_TRACKING_URI: ''
+    MCH_DEVML_SYNC: 'false'
+  script:
+    - !reference [.mch-sh-preamble, script]
+    - |
+      test -n "$MODEL" || { echo "MODEL is required (a key under models: in workspace.yaml)" >&2; exit 1; }
+    - !reference [.mch-log-ci-context, script]
+    - !reference [.mch-devml-verify-main, script]
+    - !reference [.mch-env-paths, script]
+    - !reference [.mch-cleanup-on-exit, script]
+    - !reference [.mch-devml-setup, script]
+    - !reference [.mch-devml-checkout-branch, script]
+    - |
+      banner "Register $MODEL into MLflow (no-op if unchanged)"
+      args=(--model "$MODEL" --release-commit "$(git rev-parse HEAD)" --output "$WORK/registration.yaml")
+      if [ -n "$MLFLOW_RUN_ID" ]; then args+=(--run-id "$MLFLOW_RUN_ID"); fi
+      if [ -n "$MLFLOW_TRACKING_URI" ]; then args+=(--tracking-uri "$MLFLOW_TRACKING_URI"); fi
+      if [ -n "$MLFLOW_TRACKING_TOKEN" ]; then export MLFLOW_TRACKING_TOKEN; fi
+      if [ "${MCH_DEVML_DRY_RUN:-false}" = true ]; then
+        # model_release.py has no dry run of its own: it writes to MLflow as soon
+        # as the checkpoint changed. Check what can be checked without it.
+        yq -e ".models.\"$MODEL\"" workspace.yaml >/dev/null \
+          || { echo "no models.$MODEL in workspace.yaml" >&2; exit 1; }
+        echo "dry run — would run: model_release.py ${args[*]}"
+        echo "dry run — no MLflow registration, no commit, no tag"
+      else
+        uv run --no-project --with mlflow --with anemoi-utils --with pyyaml \
+          python "$DEVML/scripts/model_release.py" "${args[@]}"
+
+        banner "Apply the registration to workspace.yaml's release block"
+        # model_release.py never touches workspace.yaml; its output's fields are
+        # release's, one to one.
+        yq eval-all -i '
+          select(fileIndex == 0).release =
+            (
+              select(fileIndex == 1)
+              | {
+                  "model": .model,
+                  "mlflow_model_name": .mlflow_model_name,
+                  "mlflow_model_version": .mlflow_model_version,
+                  "mlflow_run_id": .mlflow_run_id,
+                  "mlflow_tracking_uri": .mlflow_tracking_uri
+                }
+            )
+          | select(fileIndex == 0)
+        ' workspace.yaml "$WORK/registration.yaml"
+        echo "release -> $(yq -r '.release' workspace.yaml)"
+
+        model_name="$(yq -r '.mlflow_model_name' "$WORK/registration.yaml")"
+        version="$(yq -r '.mlflow_model_version' "$WORK/registration.yaml")"
+        echo "model_name=$model_name version=$version"
+
+        banner "Commit + push workspace.yaml"
+        if git diff --quiet -- workspace.yaml; then
+          echo "workspace.yaml unchanged (already pinned to v$version) — nothing to commit."
+        else
+          git add workspace.yaml
+          git commit -m "chore: register $model_name v$version"
+          git push orig HEAD:"$CI_COMMIT_BRANCH"
+        fi
+
+        banner "Tag the release"
+        # <patch> = highest existing $version.* tag + 1, else 0: .0 is the first
+        # registration, .N a re-release of the same version (e.g. after a
+        # deps- or config-only change).
+        git fetch --tags orig
+        patch=0
+        last_patch="$(git tag -l "$version.*" | sed -E "s/^$version\.//" | sort -n | tail -1)"
+        if [ -n "$last_patch" ]; then patch=$((last_patch + 1)); fi
+        tag="$version.$patch"
+        git tag -a "$tag" -m "Register $model_name v$version"
+        git push orig "$tag"
+        echo "Released $tag"
+      fi
+
+# The `register` pipeline, whole: check a model of workspace.yaml's `models`,
+# copy its checkpoints into the model store as $MCH_DEVML_STORE/<name> (two
+# random words) and push the `model/<name>` tag devml's `just model-register`
+# made — from main only. Nothing is written back to the repository: the store
+# keeps its own index. The consumer's job is just:
+#
+#   register:
+#     extends: [.mch-devml-register-job]
+#
+# Input, usually from the trigger: MODEL (required, a key under models:).
+# `just sync` is needed: model-register and its checks run in the venv. $WORK
+# is removed however the job ends (.mch-cleanup-on-exit; MCH_KEEP_WORK=true
+# keeps it).
+.mch-devml-register-job:
+  extends: [.mch-devml-runner]
+  # One registration at a time: two at once would each copy their checkpoints,
+  # each claim a name, and collide in git. Only the CI side can serialise this:
+  # the GitHub trigger returns as soon as the pipeline is created.
+  resource_group: model-register
+  variables:
+    MODEL: ''
+  script:
+    - !reference [.mch-sh-preamble, script]
+    - |
+      test -n "$MODEL" || { echo "MODEL is required (a key under models: in workspace.yaml)" >&2; exit 1; }
+    - !reference [.mch-log-ci-context, script]
+    - !reference [.mch-devml-verify-main, script]
+    - !reference [.mch-env-paths, script]
+    - !reference [.mch-cleanup-on-exit, script]
+    - !reference [.mch-devml-setup, script]
+    - !reference [.mch-devml-checkout-branch, script]
+    - |
+      store="${MCH_DEVML_STORE:-/store_new/mch/msopr/ml/models}"
+      if [ "${MCH_DEVML_DRY_RUN:-false}" = true ]; then
+        banner "Register $MODEL (dry run: checks only)"
+        WORKSPACE_DIR="$WS" just model-register "$MODEL" --store "$store" --dry-run
+        echo "dry run — nothing copied, nothing tagged or pushed"
+      else
+        banner "Register $MODEL"
+        # The command a human runs, so the checks are the same. Only <name>
+        # reaches stdout; logging goes to stderr.
+        name="$(WORKSPACE_DIR="$WS" just model-register "$MODEL" --store "$store")"
+        echo "registered as: $name"
+
+        banner "Push"
+        # model-register tagged the commit it registered from; nothing else
+        # changed. The model is already in the store, so a failed push takes it
+        # back out, with the command a human runs: it tombstones the store copy
+        # first, updates the index and deletes the checkpoints last, so a
+        # half-failed cleanup never loses data behind a live name. --no-git: the
+        # tag never reached the remote, and this clone is discarded anyway.
+        if ! git push orig "refs/tags/model/$name"; then
+          echo "push failed — unregistering $name again" >&2
+          WORKSPACE_DIR="$WS" just model-unregister "$name" --yes --no-git \
+            --store "$store" --reason "ci: tag push rejected" \
+            || echo "unregister failed too — clean up by hand: just model-unregister $name" >&2
+          exit 1
+        fi
+        echo "Registered $MODEL as $name"
+      fi

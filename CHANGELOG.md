@@ -14,11 +14,26 @@ on `main` (see the README's *Versioning*); entries name the directory they touch
     `.baremetal-runner-mch-linard`.
   - shell: `.mch-sh-preamble`, `.mch-log-ci-context`, `.mch-log-tool-versions`,
     `.mch-verify-main`, `.mch-assert-cluster`.
-  - env: `.mch-env-paths`, `.mch-cleanup`, `.mch-cleanup-job`.
+  - env: `.mch-env-paths`, `.mch-cleanup`, `.mch-cleanup-job`, `.mch-cleanup-on-exit`
+    (removes `$WORK` however a single-job pipeline ends, also when it fails or is
+    cancelled; `MCH_KEEP_WORK=true` keeps it). The devml release and register jobs and
+    the integration test use it.
   - uenv: `.mch-pull-uenv` (pulls containerized HPC software stacks).
   - uv: `.mch-install-uv` (uv 0.11.32, managed Python only), `.mch-uv-sync`.
+  - devml: `.mch-devml-runner`, `.mch-devml-setup` (from `.mch-devml-paths`,
+    `.mch-devml-git-auth`, `.mch-devml-clone`, `.mch-devml-tooling`,
+    `.mch-devml-workspace`), `.mch-devml-reuse`, `.mch-devml-verify-main`,
+    `.mch-devml-checkout-branch`, and the whole-pipeline jobs `.mch-devml-release-job`
+    and `.mch-devml-register-job`, moved here from varda-forecaster-det-sgm's `ci/`
+    with a dry run (`MCH_DEVML_DRY_RUN`). Release now installs the pinned uv instead of
+    the latest, and runs one at a time (`resource_group: model-release`).
+- `.github/workflows/trigger-cscs-ci.yml`: reusable workflow that triggers a CSCS-CI
+  pipeline, with masked secret variables.
+- `examples/devml-release.yml`, `examples/devml-register.yml`, `examples/devml-tests.yml`,
+  all checked by the static checks; `actionlint` for the GitHub workflows.
 
 ### Changed
+- `.cscs/` renamed to `.cscs-ci/`.
 - `v1/`: `shell.yml`, `env.yml`, `uenv.yml` and `uv.yml` folded into `.ci-ext-mch.yml`,
   so its only nested include of this repository is `cluster.yml`, and a consumer
   pointed at a branch runs that branch's blocks.

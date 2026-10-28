@@ -1,0 +1,9 @@
+# examples/devml-release.yml — a devml workspace's `release` pipeline
+# (.cscs-ci/release.yaml), whole. MODEL and the MLFLOW_* inputs come from the
+# trigger (.github/workflows/trigger-cscs-ci.yml). Linted on every PR.
+
+include:
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/.ci-ext-mch.yml'
+
+release:
+  extends: [.mch-devml-release-job]

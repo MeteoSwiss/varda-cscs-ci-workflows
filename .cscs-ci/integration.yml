@@ -1,4 +1,4 @@
-# .cscs/integration.yml — this repository's own cscs-ci pipeline "integration".
+# .cscs-ci/integration.yml — this repository's own cscs-ci pipeline "integration".
 # Runs automatically on every PR to main and every push to main; its result is
 # the `cscs/integration` status that branch protection requires.
 #
@@ -25,6 +25,7 @@ selftest:
     - !reference [.mch-sh-preamble, script]
     - !reference [.mch-log-ci-context, script]
     - !reference [.mch-env-paths, script]
+    - !reference [.mch-cleanup-on-exit, script]
     - !reference [.mch-log-tool-versions, script]
     - !reference [.mch-pull-uenv, script]
     - !reference [.mch-install-uv, script]

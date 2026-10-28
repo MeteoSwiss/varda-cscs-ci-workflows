@@ -12,7 +12,8 @@ The repository is public because GitLab's `include: remote` cannot authenticate.
 - [Usage](#usage)
 - [Switching cluster](#switching-cluster)
 - [Building blocks](#building-blocks): [runners](#runners) · [shell](#shell) · [env](#env) ·
-  [uenv](#uenv) · [uv](#uv)
+  [uenv](#uenv) · [uv](#uv) · [devml](#devml)
+- [Triggering from GitHub](#triggering-from-github)
 - [Versioning](#versioning)
 - [Migrating a repository](#migrating-a-repository)
 - [Testing](#testing)
@@ -114,6 +115,7 @@ so separate jobs (separate SLURM allocations) can hand state over through it.
 |---|---|---|
 | `.mch-env-paths` | Exports `WORK`, `HOME=$WORK/home`, `PATH=$HOME/.local/bin:$PATH`, `UV_CACHE_DIR`, and creates them. | `MCH_WORK_DIR` (verbatim, wins), else `MCH_WORK_NAME` → `$SCRATCH/$MCH_WORK_NAME/$CI_PIPELINE_ID` (default name `<project>-ci`); `UV_CACHE_DIR` (default `$SCRATCH/.cache/uv`, kept across pipelines) |
 | `.mch-cleanup` | `rm -rf $WORK`. Refuses an empty `WORK`, `/`, `$SCRATCH` or `$CI_PROJECT_DIR`. Needs `.mch-env-paths`. | – |
+| `.mch-cleanup-on-exit` | Registers the same removal as a `trap`, so `$WORK` goes however the script ends — success, a failed command, or a cancel (TERM). Reference it right after `.mch-env-paths`. Only for single-job pipelines: a later job could not reuse `$WORK`. | `MCH_KEEP_WORK` (default `false`; `true` keeps `$WORK`, e.g. to inspect a failed run) |
 | `.mch-cleanup-job` | A whole job: `when: always`, no checkout, preamble → env-paths → cleanup. Add a runner and a `stage:`. | as above |
 
 ```yaml
@@ -157,6 +159,89 @@ mytest:
 (triton JIT-compiles against it), and makes a failed Python download an error instead
 of a silent fallback.
 
+### devml
+
+Blocks for the CI of [devml](https://github.com/MeteoSwiss/devml) workspaces (e.g.
+varda-forecaster-det-sgm): clone devml, fetch the workspace at the CI commit, pin devml to
+the ref its `workspace.yaml` declares, build the venv — and the workspace's whole
+`release` and `register` pipelines. devml fetches the workspace itself, so the jobs need
+no checkout. devml lives at `$DEVML`, the workspace at `$WS`, both inside `$WORK`, where
+a later job of the pipeline finds them again.
+
+| Fragment / job | What it does |
+|---|---|
+| `.mch-devml-runner` | `.baremetal-runner-mch` with `GIT_STRATEGY: none` and `SLURM_TIMELIMIT: 00:45:00` (`just sync` downloads the cu124 torch stack). |
+| `.mch-devml-setup` | Paths, tool versions, git auth, clone devml, tooling (pinned uv, just, devml's tooling venv), fetch + pin + `workspace-check` + `just sync`. Leaves cwd at `$DEVML`. Needs `.mch-sh-preamble`, `.mch-env-paths`. |
+| `.mch-devml-reuse` | In a later job: re-derives `$DEVML`/`$WS`, checks setup's just, workspace and venv are there, cd `$DEVML`. Needs the same. |
+| `.mch-devml-release-job` | The whole `release` pipeline: `model_release.py` registers `MODEL` into MLflow, the result goes into `workspace.yaml`'s `release` block, which is committed if it changed, and a `<version>.<patch>` tag is pushed. Main only; one at a time (`resource_group: model-release`); `$WORK` is removed however it ends (`.mch-cleanup-on-exit`). |
+| `.mch-devml-register-job` | The whole `register` pipeline: `just model-register` copies `MODEL` into the store, the `model/<name>` tag is pushed — or the model is unregistered again (`just model-unregister`) if the push fails. Main only; one at a time (`resource_group: model-register`); `$WORK` is removed however it ends. |
+
+`.mch-devml-setup` is built from `.mch-devml-paths`, `.mch-devml-git-auth`,
+`.mch-devml-clone`, `.mch-devml-tooling` and `.mch-devml-workspace`, which can be
+referenced one by one too; the jobs add `.mch-devml-verify-main` and
+`.mch-devml-checkout-branch`.
+
+| Input | Default | |
+|---|---|---|
+| `MODEL` | – | release/register: a key under `models:` in `workspace.yaml` (required). |
+| `MLFLOW_TRACKING_TOKEN`, `MLFLOW_RUN_ID`, `MLFLOW_TRACKING_URI` | – | release: passed to `model_release.py`; the token is only needed when the checkpoint changed. |
+| `MCH_KEEP_WORK` | `false` | release/register: `true` keeps `$WORK` on `$SCRATCH` after the job, e.g. to inspect a failed run. |
+| `MCH_DEVML_DRY_RUN` | `false` | `true`: check everything, write nothing — no MLflow, store copy, commit, tag or push — on any branch. |
+| `MCH_DEVML_SYNC` | `true` (`false` in release) | Build the venv with `just sync`. |
+| `MCH_DEVML_STORE` | `/store_new/mch/msopr/ml/models` | register's model store. |
+| `MCH_DEVML_REPO` | `git@github.com:MeteoSwiss/devml.git` | |
+| `MCH_DEVML_SSH_KEY` | `$SCRATCH/.ssh/id_ed25519` | Key for GitHub. |
+| `MCH_DEVML_SETUP_ARGS` | `--just --tooling --anemoi-settings` | devml's `hpc/bin/setup.sh` actions. |
+| `MCH_DEVML_GIT_EMAIL`, `MCH_DEVML_GIT_NAME` | `cscs-ci@meteoswiss.ch`, `CSCS CI` | Author of release commits and tags. |
+
+A workspace's `.cscs-ci/release.yaml` is then, whole:
+
+```yaml
+include:
+  - remote: 'https://raw.githubusercontent.com/MeteoSwiss/varda-cscs-ci-workflows/main/v1/.ci-ext-mch.yml'
+
+release:
+  extends: [.mch-devml-release-job]
+```
+
+and `register.yaml` the same with `.mch-devml-register-job`. Pushing to `main` and
+pushing tags needs the project's CI job token to have push rights on protected branches.
+The tests pipeline keeps what it runs and shares the rest — see
+[`examples/devml-tests.yml`](examples/devml-tests.yml).
+
+## Triggering from GitHub
+
+[`.github/workflows/trigger-cscs-ci.yml`](.github/workflows/trigger-cscs-ci.yml) is a
+reusable workflow that starts one of the caller's CSCS-CI pipelines through the
+[API-call trigger](https://docs.cscs.ch/services/cicd/#api-call-triggering), from `main`
+only unless `main-only: false`. The caller needs the repository secrets
+`CSCS_CI_REPOSITORY_ID` and `CSCS_CI_WEBHOOK_SECRET`:
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      model: {description: "Model to release (a key under models: in workspace.yaml)", required: true}
+      mlflow_tracking_token: {description: "Only needed if the checkpoint changed", required: false}
+
+jobs:
+  release:
+    uses: MeteoSwiss/varda-cscs-ci-workflows/.github/workflows/trigger-cscs-ci.yml@main
+    with:
+      pipeline: release
+      variables: |
+        MODEL: ${{ toJSON(inputs.model) }}
+    secrets:
+      CSCS_CI_REPOSITORY_ID: ${{ secrets.CSCS_CI_REPOSITORY_ID }}
+      CSCS_CI_WEBHOOK_SECRET: ${{ secrets.CSCS_CI_WEBHOOK_SECRET }}
+      SECRET_VARIABLES: |
+        MLFLOW_TRACKING_TOKEN: ${{ toJSON(inputs.mlflow_tracking_token) }}
+```
+
+`variables` are shown in the log, `SECRET_VARIABLES` are masked. Wrap each interpolated
+value in `toJSON()` so that it stays one quoted YAML string. For a dry run from a
+branch, pass `MCH_DEVML_DRY_RUN: 'true'` and `main-only: false`.
+
 ## Versioning
 
 Versions are directories on `main`; `main` is the only branch consumers use.
@@ -189,27 +274,30 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 - **Static checks** — GitHub Actions ([`static.yml`](.github/workflows/static.yml)), on
   every PR:
   - `yamllint` over every file;
-  - `gitlab-ci schema` — GitLab's CI JSON schema (`check-jsonschema`) per file and on the
-    merged example consumer;
+  - `gitlab-ci schema` — GitLab's CI JSON schema (`check-jsonschema`) per file and on
+    each merged example consumer;
   - `shellcheck` — every script block, extracted by [`tests/shellcheck.sh`](tests/shellcheck.sh);
   - `includes on main` — every URL to this repository names `main`, and the `local` and
     `remote` includes of `v1/.ci-ext-mch.yml` match ([`tests/includes.sh`](tests/includes.sh));
-  - `gitlab lint` — GitLab's own linter (`POST /projects/:id/ci/lint`) on the example
+  - `gitlab lint` — GitLab's own linter (`POST /projects/:id/ci/lint`) on each example
     consumer merged with the blocks of the PR ([`tests/gitlab-lint.sh`](tests/gitlab-lint.sh));
-  - `merged pipeline` — `gitlab-ci-local --list` on the same merged file, which resolves
-    every `extends` and `!reference` without a token.
+  - `merged pipeline` — `gitlab-ci-local --list` on the same merged files, which resolves
+    every `extends` and `!reference` without a token;
+  - `actionlint` — the GitHub workflows, `trigger-cscs-ci.yml` among them.
 
   A consumer pulls the blocks from `main`, so linting it as-is would test `main`;
   [`tests/flatten.sh`](tests/flatten.sh) instead merges the checkout's blocks into it.
 - **Integration test** — this repository's own cscs-ci pipeline `integration`
-  ([`.cscs/integration.yml`](.cscs/integration.yml)), status `cscs/integration`. It includes
+  ([`.cscs-ci/integration.yml`](.cscs-ci/integration.yml)), status `cscs/integration`. It includes
   `v1/.ci-ext-mch.yml` with `include: local`, so the PR's blocks are what runs; inside
   this project the file also switches its nested include of `cluster.yml` to `local`
   (once `.mch-self-project` holds the mirror's project id). One job, on
   `.baremetal-runner-mch`, runs the preamble, the workdir, pulls a uenv image, installs uv
   and runs a `uv sync` on a uv-managed Python, then checks it landed on the cluster
   `cluster.yml` names — so a PR that switches cluster is tested on the new cluster before
-  it moves anyone.
+  it moves anyone. The devml blocks are not run here — they need a workspace; their
+  [examples](examples/) are linted, and a workspace can run its release or register with
+  `MCH_DEVML_DRY_RUN: 'true'` from a branch.
 
 cscs-ci does not run pipelines for PRs from forks: push branches to this repository.
 
@@ -219,9 +307,9 @@ Run the token-free checks locally with:
 uvx yamllint --strict .
 tests/shellcheck.sh
 tests/includes.sh
-tests/flatten.sh > /tmp/merged.gitlab-ci.yml
+for f in examples/*.yml; do tests/flatten.sh "$f" > "/tmp/$(basename "$f" .yml).merged.yml"; done
 uvx check-jsonschema --builtin-schema vendor.gitlab-ci --data-transform gitlab-ci --regex-variant nonunicode \
-  cluster.yml v1/.ci-ext-mch.yml .cscs/*.yml examples/*.yml /tmp/merged.gitlab-ci.yml
+  cluster.yml v1/.ci-ext-mch.yml .cscs-ci/*.yml examples/*.yml /tmp/*.merged.yml
 ```
 
 ## License
