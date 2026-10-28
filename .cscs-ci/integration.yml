@@ -25,6 +25,7 @@ selftest:
     - !reference [.mch-sh-preamble, script]
     - !reference [.mch-log-ci-context, script]
     - !reference [.mch-env-paths, script]
+    - !reference [.mch-cleanup-on-exit, script]
     - !reference [.mch-log-tool-versions, script]
     - !reference [.mch-pull-uenv, script]
     - !reference [.mch-install-uv, script]

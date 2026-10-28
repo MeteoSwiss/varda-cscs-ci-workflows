@@ -148,6 +148,38 @@ include:
       echo "removing $WORK"
       rm -rf "${WORK:?}"
 
+# Remove $WORK however the script ends — success, a failed command, or a cancel
+# (the runner sends TERM) — so a single-job pipeline never leaves its workdir on
+# $SCRATCH. Reference it right after .mch-env-paths; a final .mch-cleanup is
+# then optional. Not for a job whose $WORK a later job of the pipeline still
+# needs (use .mch-cleanup-job there). A SIGKILL cannot be trapped.
+#
+# Inputs (CI variables):
+#   MCH_KEEP_WORK  true: keep $WORK, e.g. to inspect a failed run (default false).
+.mch-cleanup-on-exit:
+  script:
+    - |
+      mch_cleanup_on_exit() {
+        local status=$?
+        if [ "${MCH_KEEP_WORK:-false}" = true ]; then
+          echo "MCH_KEEP_WORK=true — leaving $WORK (exit $status)"
+          return
+        fi
+        case "${WORK:-}" in
+          ""|/|"${SCRATCH:-/}"|"${SCRATCH:-/}/"|"${CI_PROJECT_DIR:-/}")
+            echo "refusing to remove WORK='${WORK:-}'" >&2
+            return ;;
+        esac
+        if [ -d "$WORK" ]; then
+          echo "removing $WORK (exit $status)"
+          rm -rf "${WORK:?}"
+        fi
+      }
+      trap mch_cleanup_on_exit EXIT
+      # TERM and INT end bash without running the EXIT trap; turn them into an exit.
+      trap 'exit 143' TERM
+      trap 'exit 130' INT
+
 # A whole cleanup job. It runs even when earlier jobs failed, so a workdir never
 # leaks. Add the runner and the stage:
 #
@@ -433,7 +465,8 @@ include:
 # MLFLOW_TRACKING_TOKEN (only needed when the checkpoint changed), MLFLOW_RUN_ID
 # and MLFLOW_TRACKING_URI (overrides). No `just sync`: model_release.py brings
 # its own dependencies. Pushing to main and tags needs the CI job token to have
-# push rights on protected branches.
+# push rights on protected branches. $WORK is removed however the job ends
+# (.mch-cleanup-on-exit; MCH_KEEP_WORK=true keeps it).
 .mch-devml-release-job:
   extends: [.mch-devml-runner]
   # Two releases at once would race for the same tag.
@@ -451,6 +484,7 @@ include:
     - !reference [.mch-log-ci-context, script]
     - !reference [.mch-devml-verify-main, script]
     - !reference [.mch-env-paths, script]
+    - !reference [.mch-cleanup-on-exit, script]
     - !reference [.mch-devml-setup, script]
     - !reference [.mch-devml-checkout-branch, script]
     - |
@@ -515,7 +549,6 @@ include:
         git push orig "$tag"
         echo "Released $tag"
       fi
-    - !reference [.mch-cleanup, script]
 
 # The `register` pipeline, whole: check a model of workspace.yaml's `models`,
 # copy its checkpoints into the model store as $MCH_DEVML_STORE/<name> (two
@@ -527,7 +560,9 @@ include:
 #     extends: [.mch-devml-register-job]
 #
 # Input, usually from the trigger: MODEL (required, a key under models:).
-# `just sync` is needed: model-register and its checks run in the venv.
+# `just sync` is needed: model-register and its checks run in the venv. $WORK
+# is removed however the job ends (.mch-cleanup-on-exit; MCH_KEEP_WORK=true
+# keeps it).
 .mch-devml-register-job:
   extends: [.mch-devml-runner]
   # One registration at a time: two at once would each copy their checkpoints,
@@ -543,6 +578,7 @@ include:
     - !reference [.mch-log-ci-context, script]
     - !reference [.mch-devml-verify-main, script]
     - !reference [.mch-env-paths, script]
+    - !reference [.mch-cleanup-on-exit, script]
     - !reference [.mch-devml-setup, script]
     - !reference [.mch-devml-checkout-branch, script]
     - |
@@ -574,4 +610,3 @@ include:
         fi
         echo "Registered $MODEL as $name"
       fi
-    - !reference [.mch-cleanup, script]

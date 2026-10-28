@@ -115,6 +115,7 @@ so separate jobs (separate SLURM allocations) can hand state over through it.
 |---|---|---|
 | `.mch-env-paths` | Exports `WORK`, `HOME=$WORK/home`, `PATH=$HOME/.local/bin:$PATH`, `UV_CACHE_DIR`, and creates them. | `MCH_WORK_DIR` (verbatim, wins), else `MCH_WORK_NAME` → `$SCRATCH/$MCH_WORK_NAME/$CI_PIPELINE_ID` (default name `<project>-ci`); `UV_CACHE_DIR` (default `$SCRATCH/.cache/uv`, kept across pipelines) |
 | `.mch-cleanup` | `rm -rf $WORK`. Refuses an empty `WORK`, `/`, `$SCRATCH` or `$CI_PROJECT_DIR`. Needs `.mch-env-paths`. | – |
+| `.mch-cleanup-on-exit` | Registers the same removal as a `trap`, so `$WORK` goes however the script ends — success, a failed command, or a cancel (TERM). Reference it right after `.mch-env-paths`. Only for single-job pipelines: a later job could not reuse `$WORK`. | `MCH_KEEP_WORK` (default `false`; `true` keeps `$WORK`, e.g. to inspect a failed run) |
 | `.mch-cleanup-job` | A whole job: `when: always`, no checkout, preamble → env-paths → cleanup. Add a runner and a `stage:`. | as above |
 
 ```yaml
@@ -172,8 +173,8 @@ a later job of the pipeline finds them again.
 | `.mch-devml-runner` | `.baremetal-runner-mch` with `GIT_STRATEGY: none` and `SLURM_TIMELIMIT: 00:45:00` (`just sync` downloads the cu124 torch stack). |
 | `.mch-devml-setup` | Paths, tool versions, git auth, clone devml, tooling (pinned uv, just, devml's tooling venv), fetch + pin + `workspace-check` + `just sync`. Leaves cwd at `$DEVML`. Needs `.mch-sh-preamble`, `.mch-env-paths`. |
 | `.mch-devml-reuse` | In a later job: re-derives `$DEVML`/`$WS`, checks setup's just, workspace and venv are there, cd `$DEVML`. Needs the same. |
-| `.mch-devml-release-job` | The whole `release` pipeline: `model_release.py` registers `MODEL` into MLflow, the result goes into `workspace.yaml`'s `release` block, which is committed if it changed, and a `<version>.<patch>` tag is pushed. Main only; one at a time (`resource_group: model-release`). |
-| `.mch-devml-register-job` | The whole `register` pipeline: `just model-register` copies `MODEL` into the store, the `model/<name>` tag is pushed — or the model is unregistered again (`just model-unregister`) if the push fails. Main only; one at a time (`resource_group: model-register`). |
+| `.mch-devml-release-job` | The whole `release` pipeline: `model_release.py` registers `MODEL` into MLflow, the result goes into `workspace.yaml`'s `release` block, which is committed if it changed, and a `<version>.<patch>` tag is pushed. Main only; one at a time (`resource_group: model-release`); `$WORK` is removed however it ends (`.mch-cleanup-on-exit`). |
+| `.mch-devml-register-job` | The whole `register` pipeline: `just model-register` copies `MODEL` into the store, the `model/<name>` tag is pushed — or the model is unregistered again (`just model-unregister`) if the push fails. Main only; one at a time (`resource_group: model-register`); `$WORK` is removed however it ends. |
 
 `.mch-devml-setup` is built from `.mch-devml-paths`, `.mch-devml-git-auth`,
 `.mch-devml-clone`, `.mch-devml-tooling` and `.mch-devml-workspace`, which can be
@@ -184,6 +185,7 @@ referenced one by one too; the jobs add `.mch-devml-verify-main` and
 |---|---|---|
 | `MODEL` | – | release/register: a key under `models:` in `workspace.yaml` (required). |
 | `MLFLOW_TRACKING_TOKEN`, `MLFLOW_RUN_ID`, `MLFLOW_TRACKING_URI` | – | release: passed to `model_release.py`; the token is only needed when the checkpoint changed. |
+| `MCH_KEEP_WORK` | `false` | release/register: `true` keeps `$WORK` on `$SCRATCH` after the job, e.g. to inspect a failed run. |
 | `MCH_DEVML_DRY_RUN` | `false` | `true`: check everything, write nothing — no MLflow, store copy, commit, tag or push — on any branch. |
 | `MCH_DEVML_SYNC` | `true` (`false` in release) | Build the venv with `just sync`. |
 | `MCH_DEVML_STORE` | `/store_new/mch/msopr/ml/models` | register's model store. |

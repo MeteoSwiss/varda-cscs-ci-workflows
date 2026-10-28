@@ -14,7 +14,10 @@ on `main` (see the README's *Versioning*); entries name the directory they touch
     `.baremetal-runner-mch-linard`.
   - shell: `.mch-sh-preamble`, `.mch-log-ci-context`, `.mch-log-tool-versions`,
     `.mch-verify-main`, `.mch-assert-cluster`.
-  - env: `.mch-env-paths`, `.mch-cleanup`, `.mch-cleanup-job`.
+  - env: `.mch-env-paths`, `.mch-cleanup`, `.mch-cleanup-job`, `.mch-cleanup-on-exit`
+    (removes `$WORK` however a single-job pipeline ends, also when it fails or is
+    cancelled; `MCH_KEEP_WORK=true` keeps it). The devml release and register jobs and
+    the integration test use it.
   - uenv: `.mch-pull-uenv` (pulls containerized HPC software stacks).
   - uv: `.mch-install-uv` (uv 0.11.32, managed Python only), `.mch-uv-sync`.
   - devml: `.mch-devml-runner`, `.mch-devml-setup` (from `.mch-devml-paths`,
