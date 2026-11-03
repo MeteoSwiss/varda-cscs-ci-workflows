@@ -38,6 +38,9 @@ selftest:
     - |
       banner "Check the runner's EXIT trap is kept"
       echo "runner's EXIT trap: ${mch_prev_exit_trap:-<none>}"
+      echo "now: $(trap -p EXIT)"
+      # If it is a function, show it: it is how the runner learns the exit code.
+      declare -f "${mch_prev_exit_trap%% *}" 2>/dev/null || true
       test -n "$mch_prev_exit_trap" || { echo "runner set no EXIT trap — nothing to chain" >&2; exit 1; }
     - !reference [.mch-log-tool-versions, script]
     - !reference [.mch-pull-uenv, script]
@@ -84,7 +87,10 @@ exit-code-probe:
     - |
       banner "Fail on purpose (exit 42)"
       touch "$CI_PROJECT_DIR/probe-failed"
-      exit 42
+      # A failing command under set -e, not an explicit exit: the way a real
+      # job fails (e.g. `just model-register` in the register job).
+      ( exit 42 )
+      echo "set -e did not stop the script" >&2
 
 exit-code-verify:
   extends: [.baremetal-runner-mch]
@@ -92,11 +98,16 @@ exit-code-verify:
   needs:
     - job: exit-code-probe
       artifacts: true
+  # Not GIT_STRATEGY none: the jobs share CI_PROJECT_DIR on $SCRATCH, so the
+  # probe's marker is on disk whatever the runner thought of the probe. The
+  # fetch's `git clean -ffdx` removes it before the artifacts are restored, so
+  # only an uploaded marker counts.
   variables:
-    GIT_STRATEGY: 'none'
+    GIT_STRATEGY: 'fetch'
     SLURM_TIMELIMIT: '00:05:00'
   script:
     - |
+      git -C "$CI_PROJECT_DIR" status --short --ignored
       test -f "$CI_PROJECT_DIR/probe-failed" \
         || { echo "exit-code-probe exited 42 but the runner reported success" >&2; exit 1; }
       echo "exit-code-probe was reported failed, as it should be"
