@@ -503,7 +503,8 @@ include:
         echo "dry run — would run: model_release.py ${args[*]}"
         echo "dry run — no MLflow registration, no commit, no tag"
       else
-        uv run --no-project --with mlflow --with anemoi-utils --with pyyaml \
+        export MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=false
+        uv run --no-project --with mlflow-skinny --with anemoi-utils --with pyyaml \
           python "$DEVML/scripts/model_release.py" "${args[@]}"
 
         banner "Apply the registration to workspace.yaml's release block"
