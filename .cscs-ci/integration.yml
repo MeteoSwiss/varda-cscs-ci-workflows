@@ -106,3 +106,20 @@ exit-code-verify:
       test -f "$CI_PROJECT_DIR/probe-failed" \
         || { echo "exit-code-probe exited 42 but the runner reported success" >&2; exit 1; }
       echo "exit-code-probe was reported failed, as it should be"
+
+# Minimal reproducer for the CSCS ticket: cscs-ci's own runner template, the
+# FirecREST settings spelled out, none of this repository's blocks — and a
+# script that just exits 1. Must show red; shows "Job succeeded".
+cscs-ticket-reproducer:
+  extends: [.f7t-baremetal-runner]
+  stage: test
+  variables:
+    F7T_URL: 'https://api.cscs.ch/mch/firecrest/v2'
+    FIRECREST_SYSTEM: 'linard'
+    ARCH: 'x86_64'
+    SLURM_JOB_NUM_NODES: 1
+    SLURM_NTASKS: 1
+    GIT_STRATEGY: 'none'
+  script:
+    - echo "about to exit 1"
+    - exit 1
