@@ -295,7 +295,10 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
   `.baremetal-runner-mch`, runs the preamble, the workdir, pulls a uenv image, installs uv
   and runs a `uv sync` on a uv-managed Python, then checks it landed on the cluster
   `cluster.yml` names — so a PR that switches cluster is tested on the new cluster before
-  it moves anyone. The devml blocks are not run here — they need a workspace; their
+  it moves anyone. Two more jobs check that `.mch-cleanup-on-exit` keeps a failing job
+  red: `exit-code-probe` exits 42 on purpose (an allowed failure, so the pipeline passes
+  with a warning) and uploads a marker only if the runner saw it fail;
+  `exit-code-verify` fails without that marker. The devml blocks are not run here — they need a workspace; their
   [examples](examples/) are linted, and a workspace can run its release or register with
   `MCH_DEVML_DRY_RUN: 'true'` from a branch.
 

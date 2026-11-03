@@ -6,17 +6,26 @@
 # local`, and its nested include of cluster.yml switches to local inside this
 # project too, so the pipeline tests the commit under review, never main.
 #
-# One job, on `.baremetal-runner-mch` — the cluster cluster.yml names, i.e. the
-# one every consumer is on. It runs the shell, env, uenv and uv blocks end to end — uv
-# install, a uv sync on a dependency-free fixture project on a uv-managed
-# Python — then checks it landed on that cluster. A PR that switches cluster.yml
-# therefore tests the new cluster before anyone is moved to it.
+# All jobs on `.baremetal-runner-mch` — the cluster cluster.yml names, i.e. the
+# one every consumer is on. `selftest` runs the shell, env, uenv and uv blocks
+# end to end — uv install, a uv sync on a dependency-free fixture project on a
+# uv-managed Python — then checks it landed on that cluster. A PR that switches
+# cluster.yml therefore tests the new cluster before anyone is moved to it.
+#
+# `exit-code-probe` and `exit-code-verify` check that a job using
+# .mch-cleanup-on-exit still fails when its script fails: the block's EXIT trap
+# must not swallow the runner's own, which reports the exit code.
 
 include:
   - local: '/v1/.ci-ext-mch.yml'
 
+stages:
+  - test
+  - verify
+
 selftest:
   extends: [.baremetal-runner-mch]
+  stage: test
   variables:
     SLURM_TIMELIMIT: '00:10:00'
     MCH_WORK_NAME: 'mch-recipes-selftest'
@@ -26,6 +35,10 @@ selftest:
     - !reference [.mch-log-ci-context, script]
     - !reference [.mch-env-paths, script]
     - !reference [.mch-cleanup-on-exit, script]
+    - |
+      banner "Check the runner's EXIT trap is kept"
+      echo "runner's EXIT trap: ${mch_prev_exit_trap:-<none>}"
+      test -n "$mch_prev_exit_trap" || { echo "runner set no EXIT trap — nothing to chain" >&2; exit 1; }
     - !reference [.mch-log-tool-versions, script]
     - !reference [.mch-pull-uenv, script]
     - !reference [.mch-install-uv, script]
@@ -47,3 +60,43 @@ selftest:
       PY
     - !reference [.mch-assert-cluster, script]
     - !reference [.mch-cleanup, script]
+
+# Must FAIL, with exit code 42 — that one failure is allowed, so the pipeline
+# passes with a warning. The marker is uploaded only if the runner saw the job
+# fail (artifacts:when on_failure); were the exit code swallowed, the job would
+# show green, upload nothing, and exit-code-verify would fail.
+exit-code-probe:
+  extends: [.baremetal-runner-mch]
+  stage: test
+  allow_failure:
+    exit_codes: [42]
+  artifacts:
+    when: on_failure
+    paths: [probe-failed]
+  variables:
+    GIT_STRATEGY: 'none'
+    SLURM_TIMELIMIT: '00:05:00'
+    MCH_WORK_NAME: 'mch-recipes-probe'
+  script:
+    - !reference [.mch-sh-preamble, script]
+    - !reference [.mch-env-paths, script]
+    - !reference [.mch-cleanup-on-exit, script]
+    - |
+      banner "Fail on purpose (exit 42)"
+      touch "$CI_PROJECT_DIR/probe-failed"
+      exit 42
+
+exit-code-verify:
+  extends: [.baremetal-runner-mch]
+  stage: verify
+  needs:
+    - job: exit-code-probe
+      artifacts: true
+  variables:
+    GIT_STRATEGY: 'none'
+    SLURM_TIMELIMIT: '00:05:00'
+  script:
+    - |
+      test -f "$CI_PROJECT_DIR/probe-failed" \
+        || { echo "exit-code-probe exited 42 but the runner reported success" >&2; exit 1; }
+      echo "exit-code-probe was reported failed, as it should be"
