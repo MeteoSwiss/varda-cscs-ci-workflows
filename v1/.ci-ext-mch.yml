@@ -462,7 +462,7 @@ include:
 #     extends: [.mch-devml-release-job]
 #
 # Inputs, usually from the trigger: MODEL (required, a key under models:),
-# MLFLOW_TRACKING_TOKEN (only needed when the checkpoint changed), MLFLOW_RUN_ID
+# MLFLOW_TRACKING_USERNAME/PASSWORD (only needed when the checkpoint changed), MLFLOW_RUN_ID
 # and MLFLOW_TRACKING_URI (overrides). No `just sync`: model_release.py brings
 # its own dependencies. Pushing to main and tags needs the CI job token to have
 # push rights on protected branches. $WORK is removed however the job ends
@@ -473,7 +473,8 @@ include:
   resource_group: model-release
   variables:
     MODEL: ''
-    MLFLOW_TRACKING_TOKEN: ''
+    MLFLOW_TRACKING_USERNAME: ''
+    MLFLOW_TRACKING_PASSWORD: ''
     MLFLOW_RUN_ID: ''
     MLFLOW_TRACKING_URI: ''
     MCH_DEVML_SYNC: 'false'
@@ -492,7 +493,8 @@ include:
       args=(--model "$MODEL" --release-commit "$(git rev-parse HEAD)" --output "$WORK/registration.yaml")
       if [ -n "$MLFLOW_RUN_ID" ]; then args+=(--run-id "$MLFLOW_RUN_ID"); fi
       if [ -n "$MLFLOW_TRACKING_URI" ]; then args+=(--tracking-uri "$MLFLOW_TRACKING_URI"); fi
-      if [ -n "$MLFLOW_TRACKING_TOKEN" ]; then export MLFLOW_TRACKING_TOKEN; fi
+      if [ -n "$MLFLOW_TRACKING_USERNAME" ]; then export MLFLOW_TRACKING_USERNAME; fi
+      if [ -n "$MLFLOW_TRACKING_PASSWORD" ]; then export MLFLOW_TRACKING_PASSWORD; fi
       if [ "${MCH_DEVML_DRY_RUN:-false}" = true ]; then
         # model_release.py has no dry run of its own: it writes to MLflow as soon
         # as the checkpoint changed. Check what can be checked without it.
