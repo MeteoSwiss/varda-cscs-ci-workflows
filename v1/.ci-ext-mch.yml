@@ -154,26 +154,45 @@ include:
 # then optional. Not for a job whose $WORK a later job of the pipeline still
 # needs (use .mch-cleanup-job there). A SIGKILL cannot be trapped.
 #
+# The runner has an EXIT trap of its own: it reports the script's exit code
+# (runner_script_trap), and without it a failed job shows green. So this one
+# does not replace it but runs it last, with the script's exit status in $?.
+#
 # Inputs (CI variables):
 #   MCH_KEEP_WORK  true: keep $WORK, e.g. to inspect a failed run (default false).
 .mch-cleanup-on-exit:
   script:
     - |
+      # `trap -p EXIT` prints `trap -- '<command>' EXIT`, quoted for eval.
+      mch_prev_exit_trap=""
+      mch_prev="$(trap -p EXIT)"
+      if [ -n "$mch_prev" ]; then
+        eval "set -- $mch_prev"
+        mch_prev_exit_trap="$3"
+      fi
       mch_cleanup_on_exit() {
         local status=$?
+        # The shell is exiting anyway; -e must not cut this short before the
+        # runner's trap has reported $status.
+        set +e
         if [ "${MCH_KEEP_WORK:-false}" = true ]; then
           echo "MCH_KEEP_WORK=true — leaving $WORK (exit $status)"
-          return
+        else
+          case "${WORK:-}" in
+            ""|/|"${SCRATCH:-/}"|"${SCRATCH:-/}/"|"${CI_PROJECT_DIR:-/}")
+              echo "refusing to remove WORK='${WORK:-}'" >&2 ;;
+            *)
+              if [ -d "$WORK" ]; then
+                echo "removing $WORK (exit $status)"
+                rm -rf "${WORK:?}"
+              fi ;;
+          esac
         fi
-        case "${WORK:-}" in
-          ""|/|"${SCRATCH:-/}"|"${SCRATCH:-/}/"|"${CI_PROJECT_DIR:-/}")
-            echo "refusing to remove WORK='${WORK:-}'" >&2
-            return ;;
-        esac
-        if [ -d "$WORK" ]; then
-          echo "removing $WORK (exit $status)"
-          rm -rf "${WORK:?}"
+        if [ -n "$mch_prev_exit_trap" ]; then
+          ( exit "$status" )
+          eval "$mch_prev_exit_trap"
         fi
+        exit "$status"
       }
       trap mch_cleanup_on_exit EXIT
       # TERM and INT end bash without running the EXIT trap; turn them into an exit.

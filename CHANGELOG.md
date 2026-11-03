@@ -39,6 +39,10 @@ on `main` (see the README's *Versioning*); entries name the directory they touch
   pointed at a branch runs that branch's blocks.
 
 ### Fixed
+- `v1/.ci-ext-mch.yml`: `.mch-cleanup-on-exit` replaced the runner's own EXIT trap,
+  which reports the script's exit code, so every job using it (release, register,
+  integration) showed green even when it failed. It now runs the runner's trap last,
+  with the script's exit status.
 - `v1/.ci-ext-mch.yml`: the nested `remote` includes (and the usage comment) pointed at
   the `init` branch instead of `main`; since `v1/uenv.yml` was added, the 404 on
   `init/v1/uenv.yml` stopped every consumer pipeline from being created.
