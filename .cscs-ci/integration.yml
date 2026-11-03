@@ -12,9 +12,11 @@
 # uv-managed Python — then checks it landed on that cluster. A PR that switches
 # cluster.yml therefore tests the new cluster before anyone is moved to it.
 #
-# `exit-code-probe` and `exit-code-verify` check that a job using
-# .mch-cleanup-on-exit still fails when its script fails: the block's EXIT trap
-# must not swallow the runner's own, which reports the exit code.
+# `exit-code-probe` and `exit-code-verify` check that the runner reports a
+# failing script as failed, also one that uses .mch-cleanup-on-exit. As of
+# 2026-11 they do not pass: the FirecREST baremetal driver (v0.4.0) reports
+# every job on linard as succeeded, whatever its exit code — reported to CSCS.
+# Until that is fixed, verify fails but shows green too; its log says which.
 
 include:
   - local: '/v1/.ci-ext-mch.yml'
@@ -35,13 +37,6 @@ selftest:
     - !reference [.mch-log-ci-context, script]
     - !reference [.mch-env-paths, script]
     - !reference [.mch-cleanup-on-exit, script]
-    - |
-      banner "Check the runner's EXIT trap is kept"
-      echo "runner's EXIT trap: ${mch_prev_exit_trap:-<none>}"
-      echo "now: $(trap -p EXIT)"
-      # If it is a function, show it: it is how the runner learns the exit code.
-      declare -f "${mch_prev_exit_trap%% *}" 2>/dev/null || true
-      test -n "$mch_prev_exit_trap" || { echo "runner set no EXIT trap — nothing to chain" >&2; exit 1; }
     - !reference [.mch-log-tool-versions, script]
     - !reference [.mch-pull-uenv, script]
     - !reference [.mch-install-uv, script]

@@ -29,6 +29,10 @@ on `main` (see the README's *Versioning*); entries name the directory they touch
     the latest, and runs one at a time (`resource_group: model-release`).
 - `.github/workflows/trigger-cscs-ci.yml`: reusable workflow that triggers a CSCS-CI
   pipeline, with masked secret variables.
+- `.cscs-ci/integration.yml`: `exit-code-probe` and `exit-code-verify`, which check
+  that the runner reports a failing script as failed. They do not pass yet: on linard
+  the FirecREST baremetal driver reports every job as succeeded (reported to CSCS; see
+  the README's *Testing*).
 - `examples/devml-release.yml`, `examples/devml-register.yml`, `examples/devml-tests.yml`,
   all checked by the static checks; `actionlint` for the GitHub workflows.
 
@@ -39,12 +43,6 @@ on `main` (see the README's *Versioning*); entries name the directory they touch
   pointed at a branch runs that branch's blocks.
 
 ### Fixed
-- `v1/.ci-ext-mch.yml`: `.mch-cleanup-on-exit` replaced the runner's own EXIT trap,
-  which reports the script's exit code, so every job using it (release, register,
-  integration) showed green even when it failed. It now runs the runner's trap last,
-  with the script's exit status. `.cscs-ci/integration.yml` checks this: `selftest`
-  asserts the runner's trap was kept, and `exit-code-probe` / `exit-code-verify` check
-  that a failing script is reported failed.
 - `v1/.ci-ext-mch.yml`: the nested `remote` includes (and the usage comment) pointed at
   the `init` branch instead of `main`; since `v1/uenv.yml` was added, the 404 on
   `init/v1/uenv.yml` stopped every consumer pipeline from being created.
