@@ -304,7 +304,7 @@ include:
 #
 # Inputs (CI variables):
 #   MCH_DEVML_REPO        devml clone URL (default git@github.com:MeteoSwiss/devml.git).
-#   MCH_DEVML_SSH_KEY     SSH key for GitHub (default $SCRATCH/.ssh/id_ed25519).
+#   MCH_DEVML_SSH_KEY     SSH key for GitHub with devml read access (default $SCRATCH/.ssh/id_ed25519).
 #   MCH_DEVML_GIT_EMAIL   committer of release commits and tags
 #   MCH_DEVML_GIT_NAME    (default cscs-ci@meteoswiss.ch, CSCS CI).
 #   MCH_DEVML_SETUP_ARGS  devml's hpc/bin/setup.sh actions
@@ -314,7 +314,7 @@ include:
 #   MCH_DEVML_DRY_RUN     true: release and register check everything, then
 #                         write nothing — no MLflow, store copy, commit, tag or
 #                         push — and may run off main (default false).
-# Exports: DEVML, WS, GIT_SSH_COMMAND.
+# Exports: DEVML, WS.
 
 # What every devml job shares: no checkout (devml fetches the workspace), and
 # time for `just sync`, which downloads a managed Python and the cu124
@@ -341,8 +341,6 @@ include:
   script:
     - |
       banner "Configure git auth (token redacted)"
-      MCH_DEVML_GIT_SSH="ssh -i ${MCH_DEVML_SSH_KEY:-$SCRATCH/.ssh/id_ed25519} -o IdentitiesOnly=yes"
-      MCH_DEVML_GIT_SSH+=" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR"
       git config --global credential.helper store
       ( umask 077; printf 'https://gitlab-ci-token:%s@%s\n' "$CI_JOB_TOKEN" "$CI_SERVER_HOST" > "$HOME/.git-credentials" )
       git config --global user.email "${MCH_DEVML_GIT_EMAIL:-cscs-ci@meteoswiss.ch}"
@@ -354,8 +352,12 @@ include:
   script:
     - |
       banner "Clone devml"
-      git clone -c core.sshCommand="$MCH_DEVML_GIT_SSH" \
-        "${MCH_DEVML_REPO:-git@github.com:MeteoSwiss/devml.git}" "$DEVML"
+      GIT_SSH_COMMAND="ssh \
+        -i $SCRATCH/.ssh/id_ed25519 \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=accept-new \
+        -o LogLevel=ERROR" \
+        git clone git@github.com:MeteoSwiss/devml.git "$DEVML"
       cd "$DEVML"
 
 # The pinned uv, then just and devml's tooling venv (the interpreter every
