@@ -352,7 +352,11 @@ include:
   script:
     - |
       banner "Clone devml"
-      GIT_SSH_COMMAND="ssh -i $SCRATCH/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR" \
+      GIT_SSH_COMMAND="ssh \
+        -i $SCRATCH/.ssh/id_ed25519 \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=accept-new \
+        -o LogLevel=ERROR" \
         git clone git@github.com:MeteoSwiss/devml.git "$DEVML"
       cd "$DEVML"
 
