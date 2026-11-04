@@ -544,7 +544,7 @@ include:
         # <patch> = highest existing $version.* tag + 1, else 0: .0 is the first
         # registration, .N a re-release of the same version (e.g. after a
         # deps- or config-only change).
-        git fetch --tags orig
+        git fetch --no-recurse-submodules --tags orig
         patch=0
         last_patch="$(git tag -l "$version.*" | sed -E "s/^$version\.//" | sort -n | tail -1)"
         if [ -n "$last_patch" ]; then patch=$((last_patch + 1)); fi
